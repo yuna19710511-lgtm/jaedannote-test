@@ -785,6 +785,7 @@
       <input class="intro-input" id="introCompany" type="text" placeholder="업체명을 알려주세요" autocomplete="organization" enterkeyhint="go">
       <button class="intro-start" id="introStart" type="button">시작하기</button>
       <button class="intro-skip" id="introSkip" type="button">건너뛰기</button>
+      <button class="intro-login" id="introLogin" type="button">이미 계정이 있나요? <b>로그인</b></button>
       <p class="intro-note">업체명은 화면 위쪽과 PDF에 들어가요. 설정에서 언제든 바꿀 수 있어요.</p>
     </div>
   </div>
@@ -798,6 +799,7 @@
       <span class="brand-company" id="brandCompany" role="button" tabindex="0" aria-haspopup="menu" title="업체 메뉴" hidden></span>
     </div>
     <div class="top-actions">
+      <button class="btn btn-quiet" id="authBtn" type="button" aria-label="로그인">로그인</button>
       <button class="btn btn-quiet" id="settingsBtn" type="button" aria-label="설정">설정</button>
       <button class="btn btn-quiet" id="saveBtn" type="button" aria-label="저장·작업 목록"><span class="lbl-full">저장·작업 목록</span><span class="lbl-short">저장</span></button>
       <button class="btn btn-outline" id="newBtn" type="button" aria-label="새 프로젝트"><span class="lbl-full">새 프로젝트</span><span class="lbl-short">새로</span></button>
@@ -904,6 +906,7 @@
         <div class="toolbar-actions">
           <button class="btn btn-outline" id="previewBtn" type="button">첫 도면으로</button>
           <button class="btn btn-outline" id="resultSaveBtn" type="button">저장</button>
+          <button class="btn btn-outline" id="imgBtn" type="button">보내기</button>
           <button class="btn btn-primary" id="pdfBtn" type="button">PDF</button>
         </div>
       </div>
@@ -943,6 +946,9 @@
       <button class="nav-btn strong" id="settingsSave" type="button">저장</button>
     </div>
     <div class="settings-body">
+      <div class="ios-title">계정</div>
+      <div class="ios-group" id="setAccount"></div>
+      <p class="ios-foot" id="setAccountFoot"></p>
       <div class="ios-title">업체 정보</div>
       <div class="ios-group">
         <label class="ios-row" for="setCompany"><span class="ios-label">업체명</span><input class="ios-input" id="setCompany" type="text" placeholder="예: ○○목재" autocomplete="organization"></label>
@@ -1012,19 +1018,52 @@
       <span class="nav-btn" aria-hidden="true"></span>
     </div>
     <div class="settings-body">
+      <div id="jobsAccount"></div>
       <div class="ios-title">지금 작업</div>
       <div class="ios-group">
         <div class="ios-row"><span class="ios-label">작업 이름</span><input class="ios-input" id="jobName" type="text" placeholder="예: OO아파트 주방" enterkeyhint="done"></div>
         <button class="ios-row ios-action" id="jobSave" type="button">작업 목록에 저장</button>
         <button class="ios-row ios-action" id="jobSaveAs" type="button" hidden>새 작업으로 따로 저장</button>
       </div>
-      <p class="ios-foot">작업은 이 기기에 저장돼요. 도면은 "PDF"로 받고, 다른 기기에서 이어서 고치려면 "보내기"로 링크를 보내세요.</p>
+      <p class="ios-foot"><span id="jobsWhere">작업은 이 기기에 저장돼요.</span> 도면은 "보내기"로 카톡에 이미지로 보내고, 출력은 "PDF"로 받으세요.</p>
       <div class="ios-title">저장된 작업 <span id="jobsCount"></span></div>
       <div class="ios-group">
         <div class="set-rows" id="jobsList"></div>
       </div>
       <p class="ios-foot" id="jobsEmpty">아직 저장된 작업이 없어요.</p>
       <p class="ios-foot last"></p>
+    </div>
+  </div>
+</div>
+
+<div class="settings-backdrop auth-backdrop" id="authBackdrop" hidden>
+  <div class="settings-modal auth-modal" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <div class="settings-head">
+      <button class="nav-btn" id="authClose" type="button">닫기</button>
+      <h2 id="authTitle">로그인</h2>
+      <span class="nav-btn" aria-hidden="true"></span>
+    </div>
+    <div class="settings-body">
+      <p class="auth-lead">로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.</p>
+      <div class="auth-wrap">
+        <button class="auth-google" id="authGoogle" type="button">Google 계정으로 계속하기</button>
+        <div class="auth-or"><span>또는 이메일로</span></div>
+        <div class="ios-seg auth-tabs" role="radiogroup" aria-label="로그인 또는 회원가입">
+          <label><input type="radio" name="authMode" value="login" checked><span>로그인</span></label>
+          <label><input type="radio" name="authMode" value="signup"><span>회원가입</span></label>
+        </div>
+      </div>
+      <div class="ios-group">
+        <label class="ios-row"><span class="ios-label">이메일</span><input class="ios-input" id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com"></label>
+        <label class="ios-row"><span class="ios-label">비밀번호</span><input class="ios-input" id="authPw" type="password" autocomplete="current-password" placeholder="6자 이상"></label>
+        <label class="ios-row" id="authPw2Row" hidden><span class="ios-label">비밀번호 확인</span><input class="ios-input" id="authPw2" type="password" autocomplete="new-password" placeholder="한 번 더"></label>
+      </div>
+      <p class="auth-err" id="authErr" role="alert"></p>
+      <div class="auth-wrap">
+        <button class="auth-submit" id="authSubmit" type="button">로그인</button>
+        <button class="auth-link" id="authForgot" type="button">비밀번호를 잊었어요</button>
+      </div>
+      <p class="ios-foot last">입력한 이메일은 로그인과 작업 저장에만 쓰여요.</p>
     </div>
   </div>
 </div>
@@ -1042,6 +1081,7 @@
 <div class="co-menu" id="coMenu" role="menu" hidden>
   <div class="co-menu-name" id="coMenuName"></div>
   <button class="co-menu-btn" id="coMenuSwitch" type="button" role="menuitem">업체 바꾸기</button>
+  <button class="co-menu-btn" id="coMenuAuth" type="button" role="menuitem">로그인</button>
 </div>
 <div class="toast" id="toast"></div>
 
@@ -1074,6 +1114,7 @@
   function persistSettings(){
     try{ localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings)); }
     catch(e){ toast("설정을 브라우저에 저장하지 못했습니다. (로고 용량을 줄여 보세요)"); }
+    if(window.jnPushSettings) window.jnPushSettings();
   }
   function feeNoteText(){
     return settings.feeMode==="sheet"
@@ -3193,6 +3234,7 @@
   $("setLogoFile").addEventListener("change",e=>{ handleLogoFile(e.target.files[0]); e.target.value=""; });
   $("setLogoReset").addEventListener("click",()=>setLogoPreview(""));
   function switchCompany(){
+    if(window.jnAuthUser && window.jnAuthUser()) return window.jnLogoutAndReset();
     if(!confirm("업체명과 로고를 지우고 처음 화면으로 돌아갈까요?\n단가표와 작업 중인 부품은 그대로 남아요.")) return;
     settings.companyName=""; settings.logo="";
     persistSettings();
@@ -3430,35 +3472,33 @@
     el.addEventListener("click",e=>{ if(!first || !el.classList.contains("typed")) { if(!e.target.closest(".intro-form")) close(); } });
   })();
 
-  // ===== v77 PDF 파일 바로 만들기 =====
-  const PDF_LIBS=[
-    ["jspdf","https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"],
-    ["html2canvas","https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"]
-  ];
-  function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=()=>rej(new Error("load "+src)); document.head.appendChild(s); }); }
-  async function ensurePdfLibs(){
-    if(!window.jspdf) await loadScript(PDF_LIBS[0][1]);
-    if(!window.html2canvas) await loadScript(PDF_LIBS[1][1]);
+  // ===== v78 도면 → 이미지·PDF 파일 =====
+  const OUT_LIBS={
+    jspdf:"https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js",
+    h2c:"https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"
+  };
+  const _scriptLoads={};
+  function loadScript(src){
+    if(_scriptLoads[src]) return _scriptLoads[src];
+    return _scriptLoads[src]=new Promise((res,rej)=>{
+      const el=document.createElement("script"); el.src=src; el.async=true;
+      el.onload=res; el.onerror=()=>{ delete _scriptLoads[src]; rej(new Error("load "+src)); };
+      document.head.appendChild(el);
+    });
   }
-  function pdfFileName(){
-    const d=new Date(), ymd=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`;
-    const site=($("siteName").value||"").trim();
-    return safeFileName(`${site||"재단도면"}_${ymd}`)+".pdf";
-  }
-  let pdfBusy=false;
-  async function buildPDF(){
+  function ymdStr(){ const d=new Date(); return `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}`; }
+  function outBaseName(){ const site=($("siteName").value||"").trim(); return safeFileName(`${site||"재단도면"}_${ymdStr()}`); }
+  async function renderCardCanvases(){
     attachPrintHeads();
     const cards=[...document.querySelectorAll("#previewArea .pattern-card")];
     if(!cards.length) throw new Error("no cards");
-    await ensurePdfLibs();
+    if(!window.html2canvas) await loadScript(OUT_LIBS.h2c);
     const stage=document.createElement("div"); stage.className="pdf-stage";
     document.body.appendChild(stage);
-    const { jsPDF }=window.jspdf;
-    const pdf=new jsPDF({orientation:"landscape",unit:"mm",format:"a4",compress:true});
-    const PW=297, PH=210, M=8;
+    const out=[];
     try{
-      for(let i=0;i<cards.length;i++){
-        const c=cards[i].cloneNode(true);
+      for(const card of cards){
+        const c=card.cloneNode(true);
         stage.innerHTML=""; stage.appendChild(c);
         c.querySelectorAll(".board").forEach(board=>{
           const w=Number(board.dataset.mmWidth||0), h=Number(board.dataset.mmHeight||0);
@@ -3468,93 +3508,307 @@
           board.style.height=Math.max(180,Math.floor(h*sc))+"px";
         });
         await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
-        const canvas=await window.html2canvas(c,{scale:2,backgroundColor:"#ffffff",useCORS:true,logging:false});
-        const img=canvas.toDataURL("image/jpeg",0.92);
-        const ratio=canvas.width/canvas.height;
-        let w=PW-M*2, h=w/ratio;
-        if(h>PH-M*2){ h=PH-M*2; w=h*ratio; }
-        if(i>0) pdf.addPage("a4","landscape");
-        pdf.addImage(img,"JPEG",(PW-w)/2,M,w,h);
+        out.push(await window.html2canvas(c,{scale:2,backgroundColor:"#ffffff",useCORS:true,logging:false}));
       }
     }finally{ stage.remove(); }
+    return out;
+  }
+  async function canvasesToPDF(canvases){
+    if(!window.jspdf) await loadScript(OUT_LIBS.jspdf);
+    const { jsPDF }=window.jspdf;
+    const pdf=new jsPDF({orientation:"landscape",unit:"mm",format:"a4",compress:true});
+    const PW=297, PH=210, M=8;
+    canvases.forEach((canvas,i)=>{
+      const ratio=canvas.width/canvas.height;
+      let w=PW-M*2, h=w/ratio;
+      if(h>PH-M*2){ h=PH-M*2; w=h*ratio; }
+      if(i>0) pdf.addPage("a4","landscape");
+      pdf.addImage(canvas.toDataURL("image/jpeg",0.92),"JPEG",(PW-w)/2,M,w,h);
+    });
     return pdf.output("blob");
   }
+  const canvasToBlob=c=>new Promise(r=>c.toBlob(r,"image/jpeg",0.9));
   function downloadBlob(blob,name){
     const url=URL.createObjectURL(blob);
     const a=document.createElement("a"); a.href=url; a.download=name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),60000);
   }
-  async function makeAndDeliverPDF(){
+  const isTouchDevice=()=>window.matchMedia("(pointer:coarse)").matches;
+  let outBusy=false;
+  async function deliverOutput(kind){
     if(!lastResult){ toast("먼저 최적화 계산을 해 주세요."); return; }
-    if(pdfBusy) return; pdfBusy=true;
-    const btn=$("pdfBtn"); const old=btn.textContent; btn.textContent="PDF 만드는 중…"; btn.disabled=true;
-    toast("PDF를 만들고 있어요…");
+    if(outBusy) return; outBusy=true;
+    const btn=$(kind==="pdf"?"pdfBtn":"imgBtn"); const old=btn.textContent;
+    btn.textContent="만드는 중…"; btn.disabled=true;
+    toast(kind==="pdf"?"PDF를 만들고 있어요…":"도면 이미지를 만들고 있어요…");
     try{
-      const blob=await buildPDF(), name=pdfFileName();
-      const file=new File([blob],name,{type:"application/pdf"});
-      const canShare=!!(navigator.canShare && navigator.canShare({files:[file]}));
-      const touch=window.matchMedia("(pointer:coarse)").matches;
-      if(canShare && touch){
-        const v=await jnAsk("PDF가 준비됐어요",name,[
-          {label:"카톡 등으로 보내기",value:"share",strong:true},
-          {label:"휴대폰에 저장",value:"save"}
-        ]);
-        if(v==="share"){ try{ await navigator.share({files:[file],title:name}); }catch(e){ if(!(e&&e.name==="AbortError")) downloadBlob(blob,name); } }
-        else if(v==="save") downloadBlob(blob,name);
+      const canvases=await renderCardCanvases();
+      const base=outBaseName();
+      let files=[];
+      if(kind==="pdf"){
+        files=[new File([await canvasesToPDF(canvases)],base+".pdf",{type:"application/pdf"})];
       }else{
-        downloadBlob(blob,name);
-        toast("PDF를 저장했어요.");
+        for(let i=0;i<canvases.length;i++){
+          const b=await canvasToBlob(canvases[i]);
+          files.push(new File([b],canvases.length>1?`${base}_${i+1}.jpg`:`${base}.jpg`,{type:"image/jpeg"}));
+        }
+      }
+      const canShare=!!(navigator.canShare && navigator.canShare({files}));
+      if(canShare && isTouchDevice()){
+        const v=await jnAsk(
+          kind==="pdf"?"PDF가 준비됐어요":`도면 이미지 ${files.length}장이 준비됐어요`,
+          kind==="pdf"?files[0].name:"카톡을 고르면 사진으로 보내져요.",
+          [{label:"카톡 등으로 보내기",value:"share",strong:true},{label:kind==="pdf"?"휴대폰에 저장":"사진으로 저장",value:"save"}]
+        );
+        if(v==="share"){
+          try{ await navigator.share({files,title:files[0].name}); }
+          catch(e){ if(!(e&&e.name==="AbortError")) files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300)); }
+        }else if(v==="save") files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
+      }else{
+        files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
+        toast(kind==="pdf"?"PDF를 저장했어요.":`도면 이미지 ${files.length}장을 저장했어요.`);
       }
     }catch(e){
       console.error(e);
-      toast("PDF 파일을 만들지 못해서 인쇄 화면으로 열게요.");
-      setTimeout(printPDF,400);
-    }finally{ pdfBusy=false; btn.textContent=old; btn.disabled=false; }
+      if(kind==="pdf"){ toast("PDF 파일을 만들지 못해서 인쇄 화면으로 열게요."); setTimeout(printPDF,400); }
+      else toast("이미지를 만들지 못했어요. 인터넷 연결을 확인해 주세요.");
+    }finally{ outBusy=false; btn.textContent=old; btn.disabled=false; }
   }
-  $("pdfBtn").addEventListener("click",makeAndDeliverPDF);
+  $("pdfBtn").addEventListener("click",()=>deliverOutput("pdf"));
+  $("imgBtn").addEventListener("click",()=>deliverOutput("img"));
 
-  // ===== v76 작업 목록 · 자동 저장 · 링크로 보내기 =====
+  // ===== v78 계정(Firebase) · 작업 목록 · 자동 저장 =====
   (function(){
+    const FB_V="10.12.2";
+    const FB_CFG={
+      apiKey:"AIzaSyAcPSoXzUKW2ej6-YQjxc0chQmskw1yf6Q",
+      authDomain:"jaedannote.firebaseapp.com",
+      projectId:"jaedannote",
+      storageBucket:"jaedannote.firebasestorage.app",
+      messagingSenderId:"13061358675",
+      appId:"1:13061358675:web:7741b8431692918e4372a6"
+    };
     const JOBS_KEY="jn_jobs_v1", CUR_KEY="jn_current_v1";
+    let auth=null, db=null, user=null, fbReady=null, unsubJobs=null, cloudJobs=[], justLoggedIn=false;
     let currentJobId=null, dirty=false, restoring=false;
 
-    const loadJobs=()=>{ try{ const a=JSON.parse(localStorage.getItem(JOBS_KEY)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } };
-    const saveJobs=list=>{ try{ localStorage.setItem(JOBS_KEY,JSON.stringify(list)); return true; }catch(e){ alert("저장 공간이 부족해서 저장하지 못했어요.\n안 쓰는 작업을 지운 뒤 다시 시도해 주세요."); return false; } };
-    const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-    const fmtDate=iso=>{ const d=new Date(iso); return `${d.getMonth()+1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
-    const defaultName=()=>{ const site=$("siteName").value.trim(); if(site) return site; const d=new Date(); return `재단작업 ${d.getMonth()+1}.${d.getDate()}`; };
-    const summary=data=>{
-      const n=(data.parts||[]).length;
-      let sheets="";
-      try{ const r=data.lastResult; const c=r && (r.totalSheets ?? r.totalBoards); if(c) sheets=`원장 ${c}장 · `; }catch(e){}
-      return `${sheets}부품 ${n}개`;
+    // ----- Firebase 불러오기 (백그라운드) -----
+    function initFirebase(){
+      if(fbReady) return fbReady;
+      fbReady=(async()=>{
+        const base=`https://www.gstatic.com/firebasejs/${FB_V}/`;
+        await loadScript(base+"firebase-app-compat.js");
+        await Promise.all([loadScript(base+"firebase-auth-compat.js"),loadScript(base+"firebase-firestore-compat.js")]);
+        if(!firebase.apps.length) firebase.initializeApp(FB_CFG);
+        auth=firebase.auth(); db=firebase.firestore();
+        auth.languageCode="ko";
+        try{ const r=await auth.getRedirectResult(); if(r && r.user) justLoggedIn=true; }catch(e){ console.warn(e); }
+        auth.onAuthStateChanged(onUser);
+        return true;
+      })().catch(e=>{ console.error(e); fbReady=null; throw e; });
+      return fbReady;
+    }
+    const userDoc=()=>db.collection("users").doc(user.uid);
+
+    // ----- 설정 동기화 -----
+    let psTimer=null;
+    window.jnPushSettings=function(){
+      if(!user||!db) return;
+      clearTimeout(psTimer);
+      psTimer=setTimeout(()=>{ userDoc().collection("meta").doc("settings").set({...settings,updatedAt:Date.now()}).catch(e=>console.error(e)); },300);
+    };
+    window.jnAuthUser=()=>user;
+    window.jnLogoutAndReset=async function(){
+      if(!confirm("로그아웃하고 처음 화면으로 돌아갈까요?\n계정에 저장된 작업과 설정은 그대로 남아 있어요.")) return;
+      try{ await auth.signOut(); }catch(e){}
+      settings.companyName=""; settings.logo="";
+      try{ localStorage.setItem("woodcutter_settings_v2",JSON.stringify(settings)); localStorage.removeItem("jn_intro_done"); sessionStorage.removeItem("jn_intro_seen"); }catch(e){}
+      location.reload();
     };
 
-    // 자동 저장: 지금 작업을 이 기기에 계속 남겨 둠
-    let t=null;
-    function autosave(){
-      if(restoring) return;
-      dirty=true;
-      clearTimeout(t);
-      t=setTimeout(()=>{ try{ localStorage.setItem(CUR_KEY,JSON.stringify({jobId:currentJobId,dirty,data:projectData()})); }catch(e){} },400);
+    async function onUser(u){
+      user=u||null;
+      if(unsubJobs){ unsubJobs(); unsubJobs=null; }
+      cloudJobs=[];
+      updateAuthUI(); renderIfOpen();
+      if(!user) return;
+      try{
+        const snap=await userDoc().collection("meta").doc("settings").get();
+        if(snap.exists){
+          const s=snap.data(); delete s.updatedAt;
+          settings={...cloneDefaults(),...s};
+          try{ localStorage.setItem("woodcutter_settings_v2",JSON.stringify(settings)); localStorage.setItem("jn_intro_done","1"); }catch(e){}
+          applyBranding();
+          if(lastResult) rerenderCurrentResult();
+        }else{
+          window.jnPushSettings();
+        }
+      }catch(e){ console.error(e); }
+      unsubJobs=userDoc().collection("jobs").onSnapshot(qs=>{
+        cloudJobs=qs.docs.map(d=>{ const x=d.data(); let data={}; try{ data=JSON.parse(x.json||"{}"); }catch(e){} return {id:d.id,name:x.name||"이름 없음",savedAt:x.savedAt||"",sheets:x.sheets??null,data}; });
+        renderIfOpen();
+      },e=>console.error(e));
+      if(justLoggedIn){ toast(`${user.email||"계정"}으로 로그인했어요.`); justLoggedIn=false; }
+      // 이 기기에 저장된 작업을 계정으로 옮기기 (처음 한 번)
+      const local=loadLocalJobs(), flag="jn_migrated_"+user.uid;
+      if(local.length && !localStorage.getItem(flag)){
+        const v=await ask("이 기기에 저장된 작업이 있어요",`${local.length}개를 계정으로 옮기면 폰·PC 어디서나 볼 수 있어요.`,[
+          {label:"계정으로 옮기기",value:"move",strong:true},{label:"옮기지 않기",value:"skip"}
+        ]);
+        if(v==="move"){
+          try{ for(const j of local) await cloudSave(j); saveLocalJobs([]); toast(`작업 ${local.length}개를 계정으로 옮겼어요.`); }
+          catch(e){ console.error(e); alert("옮기지 못했어요. 인터넷 연결을 확인해 주세요."); return; }
+        }
+        if(v) try{ localStorage.setItem(flag,"1"); }catch(e){}
+      }
     }
-    function persistCurrentNow(){ try{ localStorage.setItem(CUR_KEY,JSON.stringify({jobId:currentJobId,dirty,data:projectData()})); }catch(e){} }
+
+    // ----- 로그인 화면 -----
+    const AUTH_MSG={
+      "auth/invalid-email":"이메일 형식을 확인해 주세요.",
+      "auth/missing-email":"이메일을 입력해 주세요.",
+      "auth/missing-password":"비밀번호를 입력해 주세요.",
+      "auth/user-not-found":"이메일 또는 비밀번호가 맞지 않아요.",
+      "auth/wrong-password":"이메일 또는 비밀번호가 맞지 않아요.",
+      "auth/invalid-credential":"이메일 또는 비밀번호가 맞지 않아요.",
+      "auth/invalid-login-credentials":"이메일 또는 비밀번호가 맞지 않아요.",
+      "auth/email-already-in-use":"이미 가입된 이메일이에요. 로그인해 주세요.",
+      "auth/weak-password":"비밀번호는 6자 이상으로 해 주세요.",
+      "auth/too-many-requests":"시도가 너무 많아요. 잠시 후 다시 해 주세요.",
+      "auth/network-request-failed":"인터넷 연결을 확인해 주세요.",
+      "auth/unauthorized-domain":"이 주소에서는 로그인이 허용되지 않았어요.",
+      "auth/popup-blocked":"팝업이 막혔어요. 다시 한 번 눌러 주세요."
+    };
+    const showErr=e=>{ if(!e||["auth/popup-closed-by-user","auth/cancelled-popup-request"].includes(e.code)) { $("authErr").textContent=""; return; } $("authErr").textContent=AUTH_MSG[e.code]||`로그인하지 못했어요. (${e.code||e.message})`; };
+    const authMode=()=>document.querySelector('input[name="authMode"]:checked').value;
+    function syncAuthMode(){
+      const signup=authMode()==="signup";
+      $("authTitle").textContent=signup?"회원가입":"로그인";
+      $("authSubmit").textContent=signup?"가입하기":"로그인";
+      $("authPw2Row").hidden=!signup;
+      $("authForgot").hidden=signup;
+      $("authPw").setAttribute("autocomplete",signup?"new-password":"current-password");
+      $("authErr").textContent="";
+    }
+    function openAuth(mode){
+      if(mode) document.querySelector(`input[name="authMode"][value="${mode}"]`).checked=true;
+      syncAuthMode();
+      const bd=$("authBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
+      initFirebase().catch(()=>{ $("authErr").textContent="로그인 서비스에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; });
+    }
+    function closeAuth(){ const bd=$("authBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
+    window.jnOpenAuth=openAuth;
+    function busy(on){ ["authSubmit","authGoogle"].forEach(id=>$(id).disabled=on); }
+    $("authGoogle").addEventListener("click",()=>{
+      if(!auth){ $("authErr").textContent="잠시만요, 연결 중이에요. 다시 한 번 눌러 주세요."; initFirebase().catch(()=>{}); return; }
+      const p=new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({prompt:"select_account"});
+      justLoggedIn=true; busy(true);
+      auth.signInWithPopup(p).then(()=>closeAuth()).catch(e=>{
+        if(["auth/popup-blocked","auth/operation-not-supported-in-this-environment"].includes(e.code)) return auth.signInWithRedirect(p);
+        justLoggedIn=false; showErr(e);
+      }).finally(()=>busy(false));
+    });
+    $("authSubmit").addEventListener("click",async()=>{
+      if(!auth){ try{ await initFirebase(); }catch(e){ $("authErr").textContent="인터넷 연결을 확인해 주세요."; return; } }
+      const email=$("authEmail").value.trim(), pw=$("authPw").value;
+      if(!email){ $("authErr").textContent="이메일을 입력해 주세요."; return; }
+      if(!pw){ $("authErr").textContent="비밀번호를 입력해 주세요."; return; }
+      busy(true); justLoggedIn=true;
+      try{
+        if(authMode()==="signup"){
+          if(pw!==$("authPw2").value){ $("authErr").textContent="비밀번호 확인이 달라요."; justLoggedIn=false; return; }
+          await auth.createUserWithEmailAndPassword(email,pw);
+        }else{
+          await auth.signInWithEmailAndPassword(email,pw);
+        }
+        $("authPw").value=""; $("authPw2").value="";
+        closeAuth();
+      }catch(e){ justLoggedIn=false; showErr(e); }
+      finally{ busy(false); }
+    });
+    ["authEmail","authPw","authPw2"].forEach(id=>$(id).addEventListener("keydown",e=>{ if(e.key==="Enter") $("authSubmit").click(); }));
+    $("authForgot").addEventListener("click",async()=>{
+      const email=$("authEmail").value.trim();
+      if(!email){ $("authErr").textContent="비밀번호를 받을 이메일을 위 칸에 먼저 입력해 주세요."; return; }
+      try{ if(!auth) await initFirebase(); await auth.sendPasswordResetEmail(email); $("authErr").textContent=""; toast("비밀번호 재설정 메일을 보냈어요. 메일함을 확인해 주세요."); }
+      catch(e){ showErr(e); }
+    });
+    document.querySelectorAll('input[name="authMode"]').forEach(r=>r.addEventListener("change",syncAuthMode));
+    $("authClose").addEventListener("click",closeAuth);
+    $("authBackdrop").addEventListener("click",e=>{ if(e.target===$("authBackdrop")) closeAuth(); });
+    async function logout(){
+      if(!auth) return;
+      if(!confirm("로그아웃할까요?\n계정에 저장된 작업은 그대로 남아 있어요.")) return;
+      await auth.signOut();
+      toast("로그아웃했어요. 이 기기에 저장된 작업만 보여요.");
+    }
+
+    // 로그인 상태에 따라 버튼·문구 바꾸기
+    function updateAuthUI(){
+      const email=user?(user.email||"로그인됨"):"";
+      $("authBtn").hidden=!!user;
+      $("coMenuAuth").textContent=user?"로그아웃":"로그인";
+      $("setAccount").innerHTML=user
+        ? `<div class="ios-row"><span class="ios-label">로그인</span><span class="acct-email">${escapeText(email)}</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`
+        : `<button class="ios-row ios-action" type="button" data-auth="login">로그인 / 회원가입</button>`;
+      $("setAccountFoot").textContent=user
+        ? "작업 목록과 업체 설정이 계정에 저장돼서 폰·PC 어디서나 같아요."
+        : "로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.";
+      $("jobsWhere").textContent=user?"작업은 계정에 저장돼서 폰·PC 어디서나 보여요.":"작업은 이 기기에 저장돼요.";
+      const sw=$("switchCompany").closest(".ios-group"); sw.hidden=!!user; if(sw.nextElementSibling) sw.nextElementSibling.hidden=!!user;
+    }
+    $("setAccount").addEventListener("click",e=>{
+      const b=e.target.closest("[data-auth]"); if(!b) return;
+      if(b.dataset.auth==="login"){ closeSettings(); setTimeout(()=>openAuth("login"),230); } else logout();
+    });
+    $("authBtn").addEventListener("click",()=>openAuth("login"));
+    $("coMenuAuth").addEventListener("click",()=>{ $("coMenu").hidden=true; user?logout():openAuth("login"); });
+    $("introLogin").addEventListener("click",e=>{
+      e.stopPropagation();
+      try{ localStorage.setItem("jn_intro_done","1"); sessionStorage.setItem("jn_intro_seen","1"); }catch(err){}
+      const it=$("intro"); if(it){ it.classList.add("out"); document.body.classList.remove("intro-on"); setTimeout(()=>it.remove(),650); }
+      openAuth("login");
+    });
+
+    // ----- 작업 저장소: 로그인하면 계정, 아니면 이 기기 -----
+    function loadLocalJobs(){ try{ const a=JSON.parse(localStorage.getItem(JOBS_KEY)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
+    function saveLocalJobs(list){ try{ localStorage.setItem(JOBS_KEY,JSON.stringify(list)); return true; }catch(e){ alert("저장 공간이 부족해서 저장하지 못했어요.\n안 쓰는 작업을 지운 뒤 다시 시도해 주세요."); return false; } }
+    const allJobs=()=>user?cloudJobs.slice():loadLocalJobs();
+    async function cloudSave(job){
+      const d={...job.data}; delete d.lastResult; delete d.settings;
+      await userDoc().collection("jobs").doc(job.id).set({name:job.name,savedAt:job.savedAt,sheets:job.sheets??null,json:JSON.stringify(d)});
+    }
+    const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+    const fmtDate=iso=>{ if(!iso) return ""; const d=new Date(iso); return `${d.getMonth()+1}월 ${d.getDate()}일 ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`; };
+    const defaultName=()=>{ const site=$("siteName").value.trim(); if(site) return site; const d=new Date(); return `재단작업 ${d.getMonth()+1}.${d.getDate()}`; };
+    const resultSheets=r=>r?(r.totalSheets??r.totalBoards??null):null;
+    const summary=j=>{ const n=(j.data.parts||[]).length; const sh=j.sheets??resultSheets(j.data.lastResult); return `${sh?`원장 ${sh}장 · `:""}부품 ${n}개`; };
+
+    // 자동 저장: 지금 작업을 이 기기에 계속 남김
+    let t=null;
+    const persistCurrentNow=()=>{ try{ localStorage.setItem(CUR_KEY,JSON.stringify({jobId:currentJobId,dirty,data:projectData()})); }catch(e){} };
+    function autosave(){ if(restoring) return; dirty=true; clearTimeout(t); t=setTimeout(persistCurrentNow,400); }
     const left=document.querySelector(".left-panel")||document;
     left.addEventListener("input",autosave);
     left.addEventListener("change",autosave);
     new MutationObserver(autosave).observe($("partTable"),{childList:true,subtree:true});
     const pa=$("previewArea"); if(pa) new MutationObserver(autosave).observe(pa,{childList:true});
 
+    // 작업 불러오기: 결과가 없으면 다시 계산
     function applyData(data,msg){
       restoring=true;
       restoreSavedProject(data,{keepSettings:true,msg});
-      setTimeout(()=>{ restoring=false; },700);
+      if(!lastResult && data && data.hasCalculated && parts.length) $("calculateBtn").click();
+      setTimeout(()=>{ restoring=false; persistCurrentNow(); },700);
     }
 
-    // 작업 목록 창
+    // ----- 작업 목록 창 -----
     function render(){
-      const list=loadJobs().sort((a,b)=>b.savedAt.localeCompare(a.savedAt));
+      const list=allJobs().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
+      $("jobsAccount").innerHTML=user
+        ? `<div class="jobs-acct on"><span>${escapeText(user.email||"계정")}</span><b>계정에 저장 중</b></div>`
+        : `<div class="jobs-acct"><span>로그인하면 폰·PC 어디서나 이 목록이 보여요.</span><button type="button" class="job-btn strong" data-auth="login">로그인</button></div>`;
       $("jobsCount").textContent=list.length?`(${list.length})`:"";
       $("jobsEmpty").hidden=!!list.length;
       $("jobsList").parentElement.hidden=!list.length;
@@ -3562,10 +3816,10 @@
         <div class="set-row job-row${j.id===currentJobId?" is-current":""}" data-id="${j.id}">
           <button type="button" class="job-open" data-act="open">
             <b>${escapeText(j.name)}</b>
-            <span>${fmtDate(j.savedAt)} · ${escapeText(summary(j.data))}${j.id===currentJobId?" · <em>지금 작업</em>":""}</span>
+            <span>${fmtDate(j.savedAt)} · ${escapeText(summary(j))}${j.id===currentJobId?" · <em>지금 작업</em>":""}</span>
           </button>
           <button type="button" class="job-btn strong" data-act="pdf">PDF</button>
-          <button type="button" class="job-btn" data-act="send">보내기</button>
+          <button type="button" class="job-btn" data-act="img">보내기</button>
           <button type="button" class="job-btn danger" data-act="del" aria-label="${escapeText(j.name)} 삭제">삭제</button>
         </div>`).join("");
       const cur=list.find(j=>j.id===currentJobId);
@@ -3573,67 +3827,31 @@
       $("jobSave").textContent=cur?"저장 (덮어쓰기)":"작업 목록에 저장";
       $("jobSaveAs").hidden=!cur;
     }
+    const renderIfOpen=()=>{ if(!$("jobsBackdrop").hidden) render(); };
     function openJobs(){ render(); const bd=$("jobsBackdrop"); bd.classList.remove("closing"); bd.hidden=false; bd.querySelector(".settings-body").scrollTop=0; }
     function closeJobs(){ const bd=$("jobsBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
 
-    function saveJob(asNew){
+    async function saveJob(asNew){
       if(!parts.length && !$("siteName").value.trim()){ toast("저장할 내용이 없어요. 부품을 먼저 넣어 주세요."); return false; }
       const name=($("jobName").value||"").trim()||defaultName();
-      const list=loadJobs();
       const data=projectData(); delete data.settings;
-      let job=(!asNew && currentJobId) ? list.find(j=>j.id===currentJobId) : null;
-      if(job){ job.name=name; job.data=data; job.savedAt=new Date().toISOString(); }
-      else{ job={id:uid(),name,savedAt:new Date().toISOString(),data}; list.push(job); }
-      if(!saveJobs(list)) return false;
+      const existing=(!asNew && currentJobId)?allJobs().find(j=>j.id===currentJobId):null;
+      const job={id:existing?existing.id:uid(),name,savedAt:new Date().toISOString(),sheets:resultSheets(lastResult),data};
+      try{
+        if(user) await cloudSave(job);
+        else{ const list=loadLocalJobs().filter(j=>j.id!==job.id); list.push(job); if(!saveLocalJobs(list)) return false; }
+      }catch(e){ console.error(e); alert("저장하지 못했어요. 인터넷 연결을 확인해 주세요."); return false; }
       currentJobId=job.id; dirty=false; persistCurrentNow();
       toast(`"${name}" 저장했어요.`);
-      render();
+      renderIfOpen();
       return true;
     }
-
-    // 링크로 보내기 (작업 내용을 주소에 담음)
-    const b64u=bytes=>{ let s=""; bytes.forEach(b=>s+=String.fromCharCode(b)); return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); };
-    const unb64u=str=>{ str=str.replace(/-/g,"+").replace(/_/g,"/"); while(str.length%4) str+="="; const bin=atob(str); return Uint8Array.from(bin,c=>c.charCodeAt(0)); };
-    async function pack(obj){
-      const bytes=new TextEncoder().encode(JSON.stringify(obj));
-      if(window.CompressionStream){
-        try{ const cs=new Blob([bytes]).stream().pipeThrough(new CompressionStream("deflate-raw")); return "z"+b64u(new Uint8Array(await new Response(cs).arrayBuffer())); }catch(e){}
-      }
-      return "j"+b64u(bytes);
-    }
-    async function unpack(code){
-      const kind=code[0], bytes=unb64u(code.slice(1));
-      if(kind==="z"){ const ds=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw")); return JSON.parse(await new Response(ds).text()); }
-      return JSON.parse(new TextDecoder().decode(bytes));
-    }
-    async function sendJob(job){
-      const data={...job.data}; delete data.lastResult; delete data.settings;
-      const url=location.origin+location.pathname+"#job="+await pack({v:1,name:job.name,data});
-      const title=`${job.name} - 재단노트`;
-      if(navigator.share){
-        try{ await navigator.share({title,text:`재단노트 작업: ${job.name}`,url}); return; }catch(e){ if(e && e.name==="AbortError") return; }
-      }
-      try{ await navigator.clipboard.writeText(url); toast("링크를 복사했어요. 카톡 등에 붙여 넣어 보내세요."); }
-      catch(e){ prompt("아래 링크를 복사해서 보내세요.",url); }
-    }
-    async function importFromHash(){
-      const m=location.hash.match(/^#job=(.+)$/); if(!m) return false;
-      history.replaceState(null,"",location.pathname+location.search);
-      try{
-        const obj=await unpack(m[1]);
-        const name=(obj.name||"받은 작업").toString().slice(0,80);
-        const list=loadJobs();
-        const job={id:uid(),name,savedAt:new Date().toISOString(),data:obj.data};
-        list.push(job); saveJobs(list);
-        currentJobId=job.id; dirty=false;
-        applyData(obj.data,`보내온 작업 "${name}"을 불러왔어요.`);
-        if(obj.data && obj.data.hasCalculated && parts.length){ setTimeout(()=>{ restoring=true; $("calculateBtn").click(); setTimeout(()=>{ restoring=false; persistCurrentNow(); },700); },300); }
-        else persistCurrentNow();
-        return true;
-      }catch(e){ console.error(e); alert("작업 링크를 열지 못했어요. 링크가 잘렸는지 확인해 주세요."); return false; }
+    async function removeJob(id){
+      if(user) await userDoc().collection("jobs").doc(id).delete();
+      else saveLocalJobs(loadLocalJobs().filter(j=>j.id!==id));
     }
 
-    // 세 가지 중 고르는 창
+    // 고르는 창
     window.jnAsk=(...a)=>ask(...a);
     function ask(title,msg,buttons){
       return new Promise(res=>{
@@ -3659,28 +3877,27 @@
     }
     async function startNew(){
       if(dirty && parts.length){
-        const v=await ask("새 작업을 시작할까요?","지금 작업이 작업 목록에 저장되지 않았어요.",[
+        const v=await ask("새 작업을 시작할까요?","지금 작업이 저장되지 않았어요.",[
           {label:"저장하고 새로 시작",value:"save",strong:true},
           {label:"저장 안 하고 새로 시작",value:"discard",danger:true}
         ]);
         if(!v) return;
-        if(v==="save"){ $("jobName").value=defaultName(); if(!saveJob(false)) return; }
+        if(v==="save"){ $("jobName").value=defaultName(); if(!(await saveJob(false))) return; }
       }
       clearToNew();
     }
     async function openJob(id){
-      const job=loadJobs().find(j=>j.id===id); if(!job) return false;
+      const job=allJobs().find(j=>j.id===id); if(!job) return false;
       if(job.id!==currentJobId && dirty && parts.length){
-        const v=await ask(`"${job.name}" 열기`,"지금 작업이 작업 목록에 저장되지 않았어요.",[
+        const v=await ask(`"${job.name}" 열기`,"지금 작업이 저장되지 않았어요.",[
           {label:"저장하고 열기",value:"save",strong:true},
           {label:"저장 안 하고 열기",value:"discard",danger:true}
         ]);
         if(!v) return false;
-        if(v==="save"){ if(!saveJob(false)) return false; }
+        if(v==="save"){ if(!(await saveJob(false))) return false; }
       }
       currentJobId=job.id; dirty=false;
       applyData(job.data,`"${job.name}"을 불러왔어요.`);
-      persistCurrentNow();
       closeJobs();
       return true;
     }
@@ -3689,19 +3906,18 @@
       const b=e.target.closest("[data-act]"); if(!b) return;
       const id=b.closest(".job-row").dataset.id, act=b.dataset.act;
       if(act==="open") openJob(id);
-      else if(act==="pdf"){
+      else if(act==="pdf"||act==="img"){
         if(!(await openJob(id))) return;
-        setTimeout(()=>{ if(!lastResult && parts.length){ $("calculateBtn").click(); } setTimeout(()=>makeAndDeliverPDF(),lastResult?50:600); },350);
-      }
-      else if(act==="send"){ const job=loadJobs().find(j=>j.id===id); if(job) sendJob(job); }
-      else if(act==="del"){
-        const job=loadJobs().find(j=>j.id===id); if(!job) return;
+        setTimeout(()=>{ if(!lastResult && parts.length) $("calculateBtn").click(); setTimeout(()=>deliverOutput(act),lastResult?80:600); },350);
+      }else if(act==="del"){
+        const job=allJobs().find(j=>j.id===id); if(!job) return;
         if(!confirm(`"${job.name}"을 삭제할까요?`)) return;
-        saveJobs(loadJobs().filter(j=>j.id!==id));
+        try{ await removeJob(id); }catch(err){ console.error(err); alert("삭제하지 못했어요. 인터넷 연결을 확인해 주세요."); return; }
         if(currentJobId===id){ currentJobId=null; dirty=true; persistCurrentNow(); }
         render();
       }
     });
+    $("jobsAccount").addEventListener("click",e=>{ if(e.target.closest("[data-auth]")){ closeJobs(); setTimeout(()=>openAuth("login"),230); } });
     $("saveBtn").addEventListener("click",openJobs);
     $("jobsClose").addEventListener("click",closeJobs);
     $("jobsBackdrop").addEventListener("click",e=>{ if(e.target===$("jobsBackdrop")) closeJobs(); });
@@ -3709,22 +3925,27 @@
     $("jobSaveAs").addEventListener("click",()=>saveJob(true));
     $("jobName").addEventListener("keydown",e=>{ if(e.key==="Enter") saveJob(false); });
     $("newBtn").addEventListener("click",startNew);
-    document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ if(!$("askSheet").hidden) $("askCancel").click(); else closeJobs(); } });
+    document.addEventListener("keydown",e=>{
+      if(e.key!=="Escape") return;
+      if(!$("askSheet").hidden) $("askCancel").click();
+      else if(!$("authBackdrop").hidden) closeAuth();
+      else closeJobs();
+    });
 
-    // 결과 화면의 '저장': 바로 작업 목록에 저장
-    $("resultSaveBtn").addEventListener("click",()=>{
+    // 결과 화면의 '저장': 바로 저장
+    $("resultSaveBtn").addEventListener("click",async()=>{
       if(!parts.length){ toast("저장할 내용이 없어요. 부품을 먼저 넣어 주세요."); return; }
-      const list=loadJobs(), cur=list.find(j=>j.id===currentJobId);
+      const cur=allJobs().find(j=>j.id===currentJobId);
       let name=cur?cur.name:$("siteName").value.trim();
       if(!name){ name=prompt("작업 이름을 입력해 주세요. (예: OO아파트 주방)",defaultName()); if(name===null) return; name=name.trim()||defaultName(); }
       $("jobName").value=name;
-      if(saveJob(false)) toast(`"${name}" 저장했어요. 위쪽 '저장'에서 목록을 볼 수 있어요.`);
+      if(await saveJob(false)) toast(`"${name}" 저장했어요. 위쪽 '저장'에서 목록을 볼 수 있어요.`);
     });
 
-    // 시작할 때: 받은 링크 → 예전 저장 파일 → 이어서 하던 작업 순서
-    (async()=>{
-      if(await importFromHash()) return;
-      if(window.__WOODCUTTER_SAVED_PROJECT__) return;
+    // ----- 시작할 때 -----
+    updateAuthUI();
+    if(location.hash.startsWith("#job=")) history.replaceState(null,"",location.pathname+location.search);
+    if(!window.__WOODCUTTER_SAVED_PROJECT__){
       try{
         const cur=JSON.parse(localStorage.getItem(CUR_KEY)||"null");
         if(cur && cur.data && ((cur.data.parts||[]).length || cur.data.siteName)){
@@ -3733,8 +3954,12 @@
           dirty=!!cur.dirty;
         }
       }catch(e){}
-    })();
+    }
+    // 로그인 서비스는 화면이 뜬 뒤 조용히 연결
+    const kick=()=>initFirebase().catch(()=>{});
+    if("requestIdleCallback" in window) requestIdleCallback(kick,{timeout:2500}); else setTimeout(kick,1200);
   })();
+
 })();
 </script>
 
@@ -4599,6 +4824,7 @@
   .job-open span{font-size:13px;color:#8A8A8E;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .job-open em{font-style:normal;color:var(--blue);font-weight:700}
   .job-row.is-current{box-shadow:inset 3px 0 0 var(--blue)}
+  .job-row.is-current .job-open{padding-left:10px}
   .job-btn{flex:0 0 auto;border:0;border-radius:8px;background:rgba(10,92,240,.09);color:var(--blue);font-size:13.5px;font-weight:700;padding:8px 11px;cursor:pointer;font-family:inherit}
   .job-btn.danger{background:rgba(255,59,48,.09);color:#FF3B30}
   .ask-sheet{position:fixed;left:0;right:0;bottom:0;z-index:2600;padding:0 10px calc(10px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px;
@@ -4654,6 +4880,45 @@
   @media (max-width:640px){
     .center-toolbar #previewBtn{display:none}
   }
+</style>
+<style>
+  /* ===== v78: 로그인 · 계정 · 보내기 ===== */
+  #authBtn[hidden]{display:none!important}
+  .auth-backdrop{z-index:1300}
+  .auth-modal{max-height:min(760px,calc(100dvh - 40px))!important}
+  .auth-lead{margin:18px 32px 14px;font-size:14.5px;line-height:1.5;color:#3C3C43;word-break:keep-all}
+  .auth-wrap{margin:0 16px;display:flex;flex-direction:column;gap:12px}
+  .auth-google{height:50px;border-radius:12px;border:1px solid rgba(60,60,67,.18);background:#fff;font-size:16px;font-weight:700;color:#1F1F1F;cursor:pointer;font-family:inherit}
+  .auth-google:active{background:#F2F2F7}
+  .auth-or{display:flex;align-items:center;gap:10px;color:#8A8A8E;font-size:13px;margin:6px 4px 2px}
+  .auth-or::before,.auth-or::after{content:"";flex:1;height:.5px;background:rgba(60,60,67,.29)}
+  .auth-tabs{margin:0 0 12px!important;align-self:stretch}
+  .auth-tabs label{flex:1}
+  .auth-tabs span{text-align:center}
+  .auth-modal .ios-group .ios-label{min-width:92px}
+  .auth-err{min-height:20px;margin:8px 32px 4px;font-size:13.5px;color:#FF3B30;font-weight:600;word-break:keep-all}
+  .auth-err:empty{min-height:8px}
+  .auth-submit{height:52px;border:0;border-radius:14px;background:linear-gradient(180deg,#2F7BFF,#0A5CF0);color:#fff;font-size:17px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 8px 22px rgba(10,92,240,.3)}
+  .auth-submit:disabled,.auth-google:disabled{opacity:.6}
+  .auth-link{border:0;background:none;color:var(--blue);font-size:14.5px;font-weight:600;padding:6px;cursor:pointer;font-family:inherit}
+  .auth-link[hidden]{display:none}
+  .acct-email{margin-left:auto;color:#3C3C43;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:62%}
+  .jobs-acct{display:flex;align-items:center;gap:10px;margin:16px 16px 0;padding:12px 14px;border-radius:12px;background:rgba(10,92,240,.07);font-size:13.5px;color:#3C3C43;line-height:1.4;word-break:keep-all}
+  .jobs-acct span{flex:1}
+  .jobs-acct.on{background:#fff}
+  .jobs-acct.on b{color:#34A853;font-size:12.5px;white-space:nowrap}
+  .intro-login{margin-top:6px;border:0;background:none;color:rgba(255,255,255,.7);font-size:14px;padding:8px 14px;cursor:pointer;font-family:inherit}
+  .intro-login b{color:#fff;text-decoration:underline;text-underline-offset:3px}
+  @media (max-width:640px){
+    .center-toolbar{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+    .topbar .top-actions .btn{padding-left:9px!important;padding-right:9px!important}
+  }
+  @media (max-width:480px){
+    body:not(.has-co-logo) .brand .brand-title{display:none!important}
+    .brand-company{max-width:34vw!important}
+  }
+  @media print{.auth-backdrop{display:none!important}}
+
 </style>
 </body>
 </html>
