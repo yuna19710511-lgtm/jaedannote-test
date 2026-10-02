@@ -1,0 +1,14 @@
+{
+  "name": "재단노트",
+  "short_name": "재단노트",
+  "description": "합판·MDF 원장 재단 계산",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F3F6FA",
+  "theme_color": "#0A5CF0",
+  "icons": [
+    {"src": "app-icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "app-icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}
