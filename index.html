@@ -755,7 +755,7 @@
 </style>
 </head>
 <body>
-<script>try{if(sessionStorage.getItem("jn_intro_seen"))document.documentElement.classList.add("no-intro")}catch(e){}</script>
+<script>try{if(sessionStorage.getItem("jn_intro_seen")&&localStorage.getItem("jn_auth_uid"))document.documentElement.classList.add("no-intro")}catch(e){}</script>
 <div class="intro" id="intro" role="dialog" aria-label="재단노트 시작">
   <svg class="intro-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
     <g class="ib-boards">
@@ -781,12 +781,6 @@
     <img class="intro-mark" src="symbol.svg" alt="" width="56" height="56">
     <h1 class="intro-title" aria-label="재단노트"><span class="it-text" id="introType"></span><i class="it-cursor"></i></h1>
     <p class="intro-tag" id="introTag"><span>자르기 전에,</span> 재단노트</p>
-    <div class="intro-form" id="introForm" hidden>
-      <input class="intro-input" id="introCompany" type="text" placeholder="업체명을 알려주세요" autocomplete="organization" enterkeyhint="go">
-      <button class="intro-start" id="introStart" type="button">시작하기</button>
-      <button class="intro-skip" id="introSkip" type="button">건너뛰기</button>
-      <button class="intro-login" id="introLogin" type="button">이미 계정이 있나요? <b>로그인</b></button>
-      <p class="intro-note">업체명은 화면 위쪽과 PDF에 들어가요. 설정에서 언제든 바꿀 수 있어요.</p>
     </div>
   </div>
 </div>
@@ -1044,7 +1038,7 @@
       <span class="nav-btn" aria-hidden="true"></span>
     </div>
     <div class="settings-body">
-      <p class="auth-lead">로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.</p>
+      <p class="auth-lead" id="authLead">로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.</p>
       <div class="auth-wrap">
         <button class="auth-google" id="authGoogle" type="button">Google 계정으로 계속하기</button>
         <div class="auth-or"><span>또는 이메일로</span></div>
@@ -1057,6 +1051,7 @@
         <label class="ios-row"><span class="ios-label">이메일</span><input class="ios-input" id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com"></label>
         <label class="ios-row"><span class="ios-label">비밀번호</span><input class="ios-input" id="authPw" type="password" autocomplete="current-password" placeholder="6자 이상"></label>
         <label class="ios-row" id="authPw2Row" hidden><span class="ios-label">비밀번호 확인</span><input class="ios-input" id="authPw2" type="password" autocomplete="new-password" placeholder="한 번 더"></label>
+        <label class="ios-row" id="authCoRow" hidden><span class="ios-label">업체명</span><input class="ios-input" id="authCompany" type="text" autocomplete="organization" placeholder="예: ○○목재"></label>
       </div>
       <p class="auth-err" id="authErr" role="alert"></p>
       <div class="auth-wrap">
@@ -1080,7 +1075,7 @@
 
 <div class="co-menu" id="coMenu" role="menu" hidden>
   <div class="co-menu-name" id="coMenuName"></div>
-  <button class="co-menu-btn" id="coMenuSwitch" type="button" role="menuitem">업체 바꾸기</button>
+  <button class="co-menu-btn" id="coMenuSwitch" type="button" role="menuitem" hidden>업체 바꾸기</button>
   <button class="co-menu-btn" id="coMenuAuth" type="button" role="menuitem">로그인</button>
 </div>
 <div class="toast" id="toast"></div>
@@ -3428,28 +3423,29 @@
     narrowMQ.addEventListener?.("change",place);
     place();
   })();
-  // ===== v73 시작 화면 =====
+  // ===== v79 시작 화면: 로그인 필수 =====
   (function(){
-    const el=$("intro"); if(!el) return;
-    const done=()=>{ try{sessionStorage.setItem("jn_intro_seen","1")}catch(e){} };
+    const el=$("intro");
+    const cachedUid=()=>{ try{ return localStorage.getItem("jn_auth_uid"); }catch(e){ return null; } };
+    window.jnIntroClose=()=>{};
+    if(!el) return;
     if(document.documentElement.classList.contains("no-intro")){ el.remove(); return; }
-    let first=true; try{ first=!localStorage.getItem("jn_intro_done") && !(settings.companyName||"").trim(); }catch(e){}
     const reduce=window.matchMedia("(prefers-reduced-motion:reduce)").matches;
     document.body.classList.add("intro-on");
     let closed=false;
     function close(){
-      if(closed) return; closed=true; done();
-      try{localStorage.setItem("jn_intro_done","1")}catch(e){}
+      if(closed) return; closed=true;
+      try{ sessionStorage.setItem("jn_intro_seen","1"); }catch(e){}
       el.classList.add("out"); document.body.classList.remove("intro-on");
       setTimeout(()=>el.remove(),reduce?0:650);
     }
-    // 제목 타이핑: 재단(굵게) + 노트(가늘게)
+    window.jnIntroClose=close;
     const chars=[["재","b"],["단","b"],["노","l"],["트","l"]];
     const box=$("introType");
     const showRest=()=>{
       el.classList.add("typed");
-      if(first){ $("introForm").hidden=false; requestAnimationFrame(()=>el.classList.add("ask")); }
-      else setTimeout(close,reduce?600:1100);
+      if(cachedUid()) setTimeout(close,reduce?600:1100);
+      else if(window.jnGate) window.jnGate();
     };
     if(reduce){ box.innerHTML=chars.map(([c,w])=>`<span class="${w}">${c}</span>`).join(""); showRest(); }
     else{
@@ -3458,18 +3454,10 @@
         if(i<chars.length){ const [c,w]=chars[i++]; box.insertAdjacentHTML("beforeend",`<span class="${w}">${c}</span>`); setTimeout(step,i===2?260:170); }
         else setTimeout(showRest,260);
       };
-      setTimeout(step,first?650:350);
+      setTimeout(step,cachedUid()?350:650);
     }
-    function start(){
-      const name=$("introCompany").value.trim();
-      if(name){ settings.companyName=name; persistSettings(); applyBranding(); }
-      close();
-    }
-    $("introStart").addEventListener("click",start);
-    $("introCompany").addEventListener("keydown",e=>{ if(e.key==="Enter") start(); });
-    $("introSkip").addEventListener("click",close);
-    // 두 번째부터는 화면을 누르면 바로 넘어감
-    el.addEventListener("click",e=>{ if(!first || !el.classList.contains("typed")) { if(!e.target.closest(".intro-form")) close(); } });
+    // 로그인된 기기면 화면을 눌러 바로 넘어감
+    el.addEventListener("click",()=>{ if(cachedUid()) close(); });
   })();
 
   // ===== v78 도면 → 이미지·PDF 파일 =====
@@ -3590,7 +3578,9 @@
       appId:"1:13061358675:web:7741b8431692918e4372a6"
     };
     const JOBS_KEY="jn_jobs_v1", CUR_KEY="jn_current_v1";
-    let auth=null, db=null, user=null, fbReady=null, unsubJobs=null, cloudJobs=[], justLoggedIn=false;
+    let auth=null, db=null, user=null, fbReady=null, unsubJobs=null, cloudJobs=[], justLoggedIn=false, gating=false, authStep="login";
+    const UID_KEY="jn_auth_uid";
+    const cachedUid=()=>{ try{ return localStorage.getItem(UID_KEY); }catch(e){ return null; } };
     let currentJobId=null, dirty=false, restoring=false;
 
     // ----- Firebase 불러오기 (백그라운드) -----
@@ -3620,10 +3610,12 @@
     };
     window.jnAuthUser=()=>user;
     window.jnLogoutAndReset=async function(){
-      if(!confirm("로그아웃하고 처음 화면으로 돌아갈까요?\n계정에 저장된 작업과 설정은 그대로 남아 있어요.")) return;
-      try{ await auth.signOut(); }catch(e){}
-      settings.companyName=""; settings.logo="";
-      try{ localStorage.setItem("woodcutter_settings_v2",JSON.stringify(settings)); localStorage.removeItem("jn_intro_done"); sessionStorage.removeItem("jn_intro_seen"); }catch(e){}
+      if(!confirm("로그아웃할까요?\n계정에 저장된 작업과 설정은 그대로 남아 있어요.")) return;
+      try{ if(auth) await auth.signOut(); }catch(e){}
+      try{
+        [UID_KEY,"woodcutter_settings_v2",CUR_KEY,JOBS_KEY,"jn_intro_done"].forEach(k=>localStorage.removeItem(k));
+        sessionStorage.removeItem("jn_intro_seen");
+      }catch(e){}
       location.reload();
     };
 
@@ -3632,7 +3624,12 @@
       if(unsubJobs){ unsubJobs(); unsubJobs=null; }
       cloudJobs=[];
       updateAuthUI(); renderIfOpen();
-      if(!user) return;
+      if(!user){
+        // 이 기기에 로그인 기록이 있었는데 계정이 풀린 경우: 다시 로그인 받기
+        if(cachedUid()){ try{ localStorage.removeItem(UID_KEY); }catch(e){} gate(); }
+        return;
+      }
+      try{ localStorage.setItem(UID_KEY,user.uid); }catch(e){}
       try{
         const snap=await userDoc().collection("meta").doc("settings").get();
         if(snap.exists){
@@ -3650,19 +3647,33 @@
         renderIfOpen();
       },e=>console.error(e));
       if(justLoggedIn){ toast(`${user.email||"계정"}으로 로그인했어요.`); justLoggedIn=false; }
-      // 이 기기에 저장된 작업을 계정으로 옮기기 (처음 한 번)
-      const local=loadLocalJobs(), flag="jn_migrated_"+user.uid;
-      if(local.length && !localStorage.getItem(flag)){
-        const v=await ask("이 기기에 저장된 작업이 있어요",`${local.length}개를 계정으로 옮기면 폰·PC 어디서나 볼 수 있어요.`,[
-          {label:"계정으로 옮기기",value:"move",strong:true},{label:"옮기지 않기",value:"skip"}
-        ]);
-        if(v==="move"){
-          try{ for(const j of local) await cloudSave(j); saveLocalJobs([]); toast(`작업 ${local.length}개를 계정으로 옮겼어요.`); }
-          catch(e){ console.error(e); alert("옮기지 못했어요. 인터넷 연결을 확인해 주세요."); return; }
-        }
-        if(v) try{ localStorage.setItem(flag,"1"); }catch(e){}
+      // 인터넷이 끊겼을 때 이 기기에 저장한 작업은 자동으로 계정에 올림
+      const local=loadLocalJobs();
+      if(local.length){
+        try{ for(const j of local) await cloudSave(j); saveLocalJobs([]); toast(`이 기기에 저장된 작업 ${local.length}개를 계정에 올렸어요.`); }
+        catch(e){ console.error(e); }
+      }
+      // 로그인 관문: 업체명이 없으면 받고 들어가기
+      if(gating){
+        if(!(settings.companyName||"").trim()) setStep("company");
+        else finishGate();
       }
     }
+    function finishGate(){
+      gating=false;
+      $("authBackdrop").classList.remove("gate","solid");
+      closeAuth();
+      window.jnIntroClose && window.jnIntroClose();
+    }
+    function gate(){
+      gating=true;
+      const introOn=!!$("intro");
+      $("authBackdrop").classList.add("gate");
+      $("authBackdrop").classList.toggle("solid",!introOn);
+      if(introOn) $("intro").classList.add("gated");
+      openAuth("login");
+    }
+    window.jnGate=gate;
 
     // ----- 로그인 화면 -----
     const AUTH_MSG={
@@ -3682,34 +3693,50 @@
     };
     const showErr=e=>{ if(!e||["auth/popup-closed-by-user","auth/cancelled-popup-request"].includes(e.code)) { $("authErr").textContent=""; return; } $("authErr").textContent=AUTH_MSG[e.code]||`로그인하지 못했어요. (${e.code||e.message})`; };
     const authMode=()=>document.querySelector('input[name="authMode"]:checked').value;
+    function setStep(step){ authStep=step; syncAuthMode(); if(step==="company") setTimeout(()=>$("authCompany").focus(),50); }
     function syncAuthMode(){
-      const signup=authMode()==="signup";
-      $("authTitle").textContent=signup?"회원가입":"로그인";
-      $("authSubmit").textContent=signup?"가입하기":"로그인";
+      const co=authStep==="company";
+      const signup=!co && authMode()==="signup";
+      $("authTitle").textContent=co?"업체명 입력":(signup?"회원가입":"로그인");
+      $("authLead").textContent=co?"화면 위쪽과 PDF 도면에 들어갈 업체명을 알려주세요. 설정에서 언제든 바꿀 수 있어요."
+        :(gating?"재단노트는 로그인 후 사용할 수 있어요. 폰과 PC에서 같은 작업 목록을 볼 수 있어요.":"로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.");
+      $("authSubmit").textContent=co?"시작하기":(signup?"가입하기":"로그인");
+      document.querySelectorAll("#authModal .auth-wrap")[0].hidden=co;
+      $("authEmail").closest(".ios-row").hidden=co;
+      $("authPw").closest(".ios-row").hidden=co;
       $("authPw2Row").hidden=!signup;
-      $("authForgot").hidden=signup;
+      $("authCoRow").hidden=!(signup||co);
+      $("authForgot").hidden=signup||co;
+      $("authClose").style.visibility=gating?"hidden":"";
       $("authPw").setAttribute("autocomplete",signup?"new-password":"current-password");
       $("authErr").textContent="";
     }
     function openAuth(mode){
+      authStep="login";
       if(mode) document.querySelector(`input[name="authMode"][value="${mode}"]`).checked=true;
       syncAuthMode();
       const bd=$("authBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
       initFirebase().catch(()=>{ $("authErr").textContent="로그인 서비스에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; });
     }
-    function closeAuth(){ const bd=$("authBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
+    function closeAuth(){ const bd=$("authBackdrop"); if(bd.hidden) return; if(gating && !(user && authStep!=="company" && (settings.companyName||"").trim())) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
     window.jnOpenAuth=openAuth;
     function busy(on){ ["authSubmit","authGoogle"].forEach(id=>$(id).disabled=on); }
     $("authGoogle").addEventListener("click",()=>{
       if(!auth){ $("authErr").textContent="잠시만요, 연결 중이에요. 다시 한 번 눌러 주세요."; initFirebase().catch(()=>{}); return; }
       const p=new firebase.auth.GoogleAuthProvider(); p.setCustomParameters({prompt:"select_account"});
       justLoggedIn=true; busy(true);
-      auth.signInWithPopup(p).then(()=>closeAuth()).catch(e=>{
+      auth.signInWithPopup(p).then(()=>{ if(!gating) closeAuth(); }).catch(e=>{
         if(["auth/popup-blocked","auth/operation-not-supported-in-this-environment"].includes(e.code)) return auth.signInWithRedirect(p);
         justLoggedIn=false; showErr(e);
       }).finally(()=>busy(false));
     });
     $("authSubmit").addEventListener("click",async()=>{
+      if(authStep==="company"){
+        const name=$("authCompany").value.trim();
+        if(!name){ $("authErr").textContent="업체명을 입력해 주세요."; return; }
+        settings.companyName=name; persistSettings(); applyBranding();
+        authStep="login"; finishGate(); return;
+      }
       if(!auth){ try{ await initFirebase(); }catch(e){ $("authErr").textContent="인터넷 연결을 확인해 주세요."; return; } }
       const email=$("authEmail").value.trim(), pw=$("authPw").value;
       if(!email){ $("authErr").textContent="이메일을 입력해 주세요."; return; }
@@ -3718,16 +3745,19 @@
       try{
         if(authMode()==="signup"){
           if(pw!==$("authPw2").value){ $("authErr").textContent="비밀번호 확인이 달라요."; justLoggedIn=false; return; }
+          const co=$("authCompany").value.trim();
+          if(!co){ $("authErr").textContent="업체명을 입력해 주세요."; justLoggedIn=false; return; }
+          settings.companyName=co; persistSettings(); applyBranding();
           await auth.createUserWithEmailAndPassword(email,pw);
         }else{
           await auth.signInWithEmailAndPassword(email,pw);
         }
         $("authPw").value=""; $("authPw2").value="";
-        closeAuth();
+        if(!gating) closeAuth();
       }catch(e){ justLoggedIn=false; showErr(e); }
       finally{ busy(false); }
     });
-    ["authEmail","authPw","authPw2"].forEach(id=>$(id).addEventListener("keydown",e=>{ if(e.key==="Enter") $("authSubmit").click(); }));
+    ["authEmail","authPw","authPw2","authCompany"].forEach(id=>$(id).addEventListener("keydown",e=>{ if(e.key==="Enter") $("authSubmit").click(); }));
     $("authForgot").addEventListener("click",async()=>{
       const email=$("authEmail").value.trim();
       if(!email){ $("authErr").textContent="비밀번호를 받을 이메일을 위 칸에 먼저 입력해 주세요."; return; }
@@ -3737,40 +3767,28 @@
     document.querySelectorAll('input[name="authMode"]').forEach(r=>r.addEventListener("change",syncAuthMode));
     $("authClose").addEventListener("click",closeAuth);
     $("authBackdrop").addEventListener("click",e=>{ if(e.target===$("authBackdrop")) closeAuth(); });
-    async function logout(){
-      if(!auth) return;
-      if(!confirm("로그아웃할까요?\n계정에 저장된 작업은 그대로 남아 있어요.")) return;
-      await auth.signOut();
-      toast("로그아웃했어요. 이 기기에 저장된 작업만 보여요.");
-    }
+    const logout=()=>window.jnLogoutAndReset();
 
     // 로그인 상태에 따라 버튼·문구 바꾸기
     function updateAuthUI(){
       const email=user?(user.email||"로그인됨"):"";
-      $("authBtn").hidden=!!user;
-      $("coMenuAuth").textContent=user?"로그아웃":"로그인";
+      $("authBtn").hidden=true;
+      $("coMenuAuth").textContent="로그아웃";
       $("setAccount").innerHTML=user
         ? `<div class="ios-row"><span class="ios-label">로그인</span><span class="acct-email">${escapeText(email)}</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`
-        : `<button class="ios-row ios-action" type="button" data-auth="login">로그인 / 회원가입</button>`;
+        : `<div class="ios-row"><span class="ios-label">계정</span><span class="acct-email">연결 중…</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`;
       $("setAccountFoot").textContent=user
         ? "작업 목록과 업체 설정이 계정에 저장돼서 폰·PC 어디서나 같아요."
-        : "로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.";
+        : "인터넷이 연결되면 계정과 자동으로 맞춰져요. 그동안 저장한 작업은 이 기기에 보관돼요.";
       $("jobsWhere").textContent=user?"작업은 계정에 저장돼서 폰·PC 어디서나 보여요.":"작업은 이 기기에 저장돼요.";
-      const sw=$("switchCompany").closest(".ios-group"); sw.hidden=!!user; if(sw.nextElementSibling) sw.nextElementSibling.hidden=!!user;
+      const sw=$("switchCompany").closest(".ios-group"); sw.hidden=true; if(sw.nextElementSibling) sw.nextElementSibling.hidden=true;
     }
     $("setAccount").addEventListener("click",e=>{
       const b=e.target.closest("[data-auth]"); if(!b) return;
       if(b.dataset.auth==="login"){ closeSettings(); setTimeout(()=>openAuth("login"),230); } else logout();
     });
     $("authBtn").addEventListener("click",()=>openAuth("login"));
-    $("coMenuAuth").addEventListener("click",()=>{ $("coMenu").hidden=true; user?logout():openAuth("login"); });
-    $("introLogin").addEventListener("click",e=>{
-      e.stopPropagation();
-      try{ localStorage.setItem("jn_intro_done","1"); sessionStorage.setItem("jn_intro_seen","1"); }catch(err){}
-      const it=$("intro"); if(it){ it.classList.add("out"); document.body.classList.remove("intro-on"); setTimeout(()=>it.remove(),650); }
-      openAuth("login");
-    });
-
+    $("coMenuAuth").addEventListener("click",()=>{ $("coMenu").hidden=true; logout(); });
     // ----- 작업 저장소: 로그인하면 계정, 아니면 이 기기 -----
     function loadLocalJobs(){ try{ const a=JSON.parse(localStorage.getItem(JOBS_KEY)||"[]"); return Array.isArray(a)?a:[]; }catch(e){ return []; } }
     function saveLocalJobs(list){ try{ localStorage.setItem(JOBS_KEY,JSON.stringify(list)); return true; }catch(e){ alert("저장 공간이 부족해서 저장하지 못했어요.\n안 쓰는 작업을 지운 뒤 다시 시도해 주세요."); return false; } }
@@ -3808,7 +3826,7 @@
       const list=allJobs().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
       $("jobsAccount").innerHTML=user
         ? `<div class="jobs-acct on"><span>${escapeText(user.email||"계정")}</span><b>계정에 저장 중</b></div>`
-        : `<div class="jobs-acct"><span>로그인하면 폰·PC 어디서나 이 목록이 보여요.</span><button type="button" class="job-btn strong" data-auth="login">로그인</button></div>`;
+        : `<div class="jobs-acct"><span>계정에 연결되지 않았어요. 지금은 이 기기에 저장돼요.</span></div>`;
       $("jobsCount").textContent=list.length?`(${list.length})`:"";
       $("jobsEmpty").hidden=!!list.length;
       $("jobsList").parentElement.hidden=!list.length;
@@ -3956,8 +3974,12 @@
       }catch(e){}
     }
     // 로그인 서비스는 화면이 뜬 뒤 조용히 연결
-    const kick=()=>initFirebase().catch(()=>{});
-    if("requestIdleCallback" in window) requestIdleCallback(kick,{timeout:2500}); else setTimeout(kick,1200);
+    initFirebase().catch(()=>{
+      // 인터넷이 없을 때: 로그인한 적 없는 기기는 로그인 창에 안내
+      if(!cachedUid()) $("authErr").textContent="인터넷에 연결되지 않았어요. 연결한 뒤 다시 열어 주세요.";
+    });
+    // 시작 화면이 이미 생략된 경우(새로고침)에도 로그인 기록이 없으면 관문
+    if(!$("intro") && !cachedUid()) gate();
   })();
 
 })();
@@ -4919,6 +4941,23 @@
   }
   @media print{.auth-backdrop{display:none!important}}
 
+</style>
+
+<style>
+  /* ===== v79: 로그인 필수 ===== */
+  #authBtn{display:none!important}
+  .auth-backdrop.gate{z-index:6000!important;background:rgba(5,7,12,.35)!important;backdrop-filter:none!important}
+  .auth-backdrop.gate.solid{background:#05070C!important}
+  .auth-backdrop.gate .settings-modal{box-shadow:0 30px 80px rgba(0,0,0,.55)!important}
+  .auth-modal .auth-wrap[hidden]{display:none!important}
+  .intro .intro-inner{transition:transform .5s cubic-bezier(.2,.9,.25,1)}
+  .intro.gated .intro-inner{transform:translateY(calc(-50dvh + 130px)) scale(.82)}
+  .intro.gated .intro-mark{margin-bottom:10px}
+  .auth-backdrop.gate .settings-modal{height:auto!important;max-height:calc(100dvh - 250px)!important}
+  @media (min-width:641px){
+    .auth-backdrop.gate{align-items:flex-end!important;padding-bottom:5vh!important}
+    .auth-backdrop.gate .settings-modal{max-height:calc(100dvh - 280px)!important}
+  }
 </style>
 </body>
 </html>
