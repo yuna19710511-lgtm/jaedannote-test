@@ -787,7 +787,7 @@
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <img class="app-logo" src="logo-compact.svg" alt="재단노트" width="107" height="32">
+      <img class="app-logo" id="homeLogo" src="logo-compact.svg" alt="재단노트 홈으로" title="홈으로" width="107" height="32" role="button" tabindex="0">
       <img class="brand-logo" id="brandLogo" src="symbol.svg" alt="업체 로고 (업체 메뉴)" tabindex="0" role="button" aria-haspopup="menu">
       <div class="brand-title" id="brandTitle">재단노트</div>
       <span class="brand-company" id="brandCompany" role="button" tabindex="0" aria-haspopup="menu" title="업체 메뉴" hidden></span>
@@ -3351,6 +3351,15 @@
   }
   $("calculateBtn").addEventListener("click",()=>{ if(lastResult && isNarrow()) setView("result"); });
   $("backToInput").addEventListener("click",()=>setView("input"));
+  // 맨 위 재단노트 로고 = 홈(처음 화면)
+  function goHome(){
+    if(isNarrow()) setView("input");
+    const lp=document.querySelector(".left-panel"); if(lp) lp.scrollTo({top:0,behavior:"smooth"});
+    window.scrollTo({top:0,behavior:"smooth"});
+  }
+  $("homeLogo").addEventListener("click",goHome);
+  $("homeLogo").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); goHome(); } });
+  $("brandTitle").addEventListener("click",goHome);
   window.matchMedia("(max-width:980px)").addEventListener?.("change",e=>{ if(!e.matches) document.body.dataset.view="input"; });
 
   // 인쇄용 머리글: 업체 로고·이름·현장·작성일·합계 (v67)
@@ -5116,6 +5125,13 @@
   .auth-keep input{width:20px;height:20px;accent-color:var(--blue);margin:0;cursor:pointer}
   .out-copy{display:block;width:100%;margin-top:10px;border:0;background:none;color:var(--blue);font-size:14px;font-weight:600;padding:6px;cursor:pointer;font-family:inherit}
   .out-copy[hidden]{display:none!important}
+</style>
+
+<style>
+  /* ===== v83: 로고 = 홈 ===== */
+  #homeLogo,#brandTitle{cursor:pointer;-webkit-tap-highlight-color:transparent}
+  #homeLogo:active{opacity:.7}
+  #homeLogo:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:6px}
 </style>
 </body>
 </html>
