@@ -3357,9 +3357,12 @@
     const lp=document.querySelector(".left-panel"); if(lp) lp.scrollTo({top:0,behavior:"smooth"});
     window.scrollTo({top:0,behavior:"smooth"});
   }
-  $("homeLogo").addEventListener("click",goHome);
+  document.querySelector(".brand").addEventListener("click",e=>{
+    if(e.target.closest("#brandCompany,#brandLogo")) return;
+    goHome();
+  });
   $("homeLogo").addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); goHome(); } });
-  $("brandTitle").addEventListener("click",goHome);
+
   window.matchMedia("(max-width:980px)").addEventListener?.("change",e=>{ if(!e.matches) document.body.dataset.view="input"; });
 
   // 인쇄용 머리글: 업체 로고·이름·현장·작성일·합계 (v67)
@@ -3556,6 +3559,8 @@
     setTimeout(()=>URL.revokeObjectURL(url),60000);
   }
   const isTouchDevice=()=>window.matchMedia("(pointer:coarse)").matches;
+  const isIOS=()=>/iPhone|iPad|iPod/i.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+  const isAndroid=()=>/Android/i.test(navigator.userAgent);
   let outBusy=false;
   async function deliverOutput(kind){
     if(!lastResult){ toast("먼저 최적화 계산을 해 주세요."); return; }
@@ -3597,13 +3602,19 @@
     const canShareFiles=!!(navigator.canShare && navigator.canShare({files}));
     $("outCopy").hidden=pdf || isTouchDevice() || !(navigator.clipboard && window.ClipboardItem);
     $("outPrev").hidden=$("outNext").hidden=canvases.length<2;
-    $("outHint").textContent=canShareFiles?"":(pdf?"이 브라우저는 공유 창을 지원하지 않아 저장으로 처리돼요."
+    $("outHint").textContent=(isIOS()&&canShareFiles)?(pdf?"저장을 누르면 공유 창이 열려요. '파일에 저장'을 누르세요.":"사진으로 저장을 누르면 공유 창이 열려요. '이미지 저장'을 누르면 사진 앱에 들어가요.")
+      :(isAndroid()&&!pdf)?"사진으로 저장하면 갤러리의 Download 앨범에 들어가요."
+      :canShareFiles?"":(pdf?"이 브라우저는 공유 창을 지원하지 않아 저장으로 처리돼요."
       :(isTouchDevice()?"공유를 누르면 도면이 복사돼요. 보낼 곳에서 길게 눌러 붙여 넣으세요.":"이 브라우저는 공유 창을 지원하지 않아 공유를 누르면 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요."));
     $("outTrack").scrollLeft=0; syncOutCount();
     const bd=$("outBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
   }
   function closeOut(){ const bd=$("outBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); $("outTrack").innerHTML=""; outState=null; },220); }
-  function savedToast(n,pdf){ toast(isTouchDevice()?(pdf?"PDF를 저장했어요.":`사진 ${n}장을 저장했어요.`):(pdf?"PDF를 다운로드 폴더에 저장했어요.":`도면 ${n}장을 다운로드 폴더에 저장했어요.`)); }
+  function savedToast(n,pdf){
+    if(isAndroid()) toast(pdf?"PDF를 저장했어요. 내 파일 → 다운로드 폴더에 있어요.":`도면 ${n}장을 저장했어요. 갤러리 → Download 앨범에 있어요.`);
+    else if(isIOS()) toast(pdf?"PDF를 저장했어요. 파일 앱 → 다운로드 폴더에 있어요.":`도면 ${n}장을 저장했어요. 파일 앱 → 다운로드 폴더에 있어요.`);
+    else toast(pdf?"PDF를 다운로드 폴더에 저장했어요.":`도면 ${n}장을 다운로드 폴더에 저장했어요.`);
+  }
   $("outTrack").addEventListener("scroll",()=>{ clearTimeout(window.__outT); window.__outT=setTimeout(syncOutCount,60); },{passive:true});
   $("outClose").addEventListener("click",closeOut);
   const outGo=d=>{ const t=$("outTrack"); t.scrollTo({left:(outIndex()+d)*t.clientWidth,behavior:"smooth"}); };
@@ -3611,9 +3622,13 @@
   $("outNext").addEventListener("click",()=>outGo(1));
 
   document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("outBackdrop").hidden) closeOut(); });
-  $("outSave").addEventListener("click",()=>{
+  $("outSave").addEventListener("click",async()=>{
     if(!outState) return;
     const {files,kind}=outState;
+    if(isIOS() && navigator.canShare && navigator.canShare({files})){
+      try{ await navigator.share({files,title:files[0].name}); return; }
+      catch(e){ if(e&&e.name==="AbortError") return; }
+    }
     files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
     savedToast(files.length,kind==="pdf");
   });
@@ -5132,6 +5147,12 @@
   #homeLogo,#brandTitle{cursor:pointer;-webkit-tap-highlight-color:transparent}
   #homeLogo:active{opacity:.7}
   #homeLogo:focus-visible{outline:2px solid var(--blue);outline-offset:3px;border-radius:6px}
+</style>
+
+<style>
+  /* ===== v84: 홈 누르는 범위 ===== */
+  .brand{touch-action:manipulation}
+  .brand .app-logo,.brand .brand-title{cursor:pointer}
 </style>
 </body>
 </html>
