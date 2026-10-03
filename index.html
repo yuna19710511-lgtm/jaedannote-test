@@ -5063,5 +5063,15 @@
   }
   @media print{.out-backdrop{display:none!important}}
 </style>
+
+<style>
+  /* ===== v81: 안내 문구는 항상 맨 앞 ===== */
+  .toast{z-index:9000!important;text-align:center;max-width:min(520px,calc(100% - 32px));word-break:keep-all}
+  body:has(.settings-backdrop:not([hidden])) .toast,
+  body:has(#askSheet:not([hidden])) .toast{top:calc(16px + env(safe-area-inset-top))!important;bottom:auto!important;transform:translate(-50%,-12px)}
+  body:has(.settings-backdrop:not([hidden])) .toast.show,
+  body:has(#askSheet:not([hidden])) .toast.show{transform:translate(-50%,0)}
+  @media print{.toast{display:none!important}}
+</style>
 </body>
 </html>
