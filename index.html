@@ -755,7 +755,7 @@
 </style>
 </head>
 <body>
-<script>try{if(sessionStorage.getItem("jn_intro_seen")&&localStorage.getItem("jn_auth_uid"))document.documentElement.classList.add("no-intro")}catch(e){}</script>
+<script>try{if(sessionStorage.getItem("jn_intro_seen")&&(localStorage.getItem("jn_auth_uid")||sessionStorage.getItem("jn_auth_uid")))document.documentElement.classList.add("no-intro")}catch(e){}</script>
 <div class="intro" id="intro" role="dialog" aria-label="재단노트 시작">
   <svg class="intro-bg" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
     <g class="ib-boards">
@@ -1007,9 +1007,9 @@
 <div class="settings-backdrop jobs-backdrop" id="jobsBackdrop" hidden>
   <div class="settings-modal" id="jobsModal" role="dialog" aria-modal="true" aria-labelledby="jobsTitle">
     <div class="settings-head">
-      <button class="nav-btn" id="jobsClose" type="button">닫기</button>
-      <h2 id="jobsTitle">작업 목록</h2>
       <span class="nav-btn" aria-hidden="true"></span>
+      <h2 id="jobsTitle">작업 목록</h2>
+      <button class="x-btn" id="jobsClose" type="button" aria-label="닫기">✕</button>
     </div>
     <div class="settings-body">
       <div id="jobsAccount"></div>
@@ -1053,6 +1053,7 @@
         <input class="auth-input" id="authPw2" type="password" autocomplete="new-password" placeholder="비밀번호 확인" aria-label="비밀번호 확인" hidden>
         <input class="auth-input" id="authCompany" type="text" autocomplete="off" placeholder="업체명을 입력해 주세요" aria-label="업체명" hidden>
       </div>
+      <label class="auth-keep" id="authKeepRow"><input type="checkbox" id="authKeep"><span>로그인 상태 유지</span></label>
       <p class="auth-err" id="authErr" role="alert"></p>
       <div class="auth-wrap">
         <button class="auth-submit" id="authSubmit" type="button">로그인</button>
@@ -1066,9 +1067,9 @@
 <div class="settings-backdrop out-backdrop" id="outBackdrop" hidden>
   <div class="settings-modal out-modal" role="dialog" aria-modal="true" aria-labelledby="outTitle">
     <div class="settings-head">
-      <button class="nav-btn" id="outClose" type="button">닫기</button>
-      <h2 id="outTitle">미리보기</h2>
       <span class="nav-btn out-count" id="outCount"></span>
+      <h2 id="outTitle">미리보기</h2>
+      <button class="x-btn" id="outClose" type="button" aria-label="닫기">✕</button>
     </div>
     <div class="out-body">
       <div class="out-track" id="outTrack"></div>
@@ -1081,6 +1082,7 @@
         <button class="out-btn" id="outSave" type="button">사진으로 저장</button>
         <button class="out-btn strong" id="outShare" type="button">공유</button>
       </div>
+      <button class="out-copy" id="outCopy" type="button" hidden>이미지 복사 (Ctrl+V로 붙여넣기)</button>
     </div>
   </div>
 </div>
@@ -3232,7 +3234,7 @@
   $("settingsBtn").addEventListener("click",openSettings);
   $("settingsCancel").addEventListener("click",closeSettings);
   $("settingsSave").addEventListener("click",saveSettingsFromForm);
-  $("settingsBackdrop").addEventListener("click",e=>{ if(e.target.id==="settingsBackdrop") closeSettings(); });
+
   document.querySelectorAll('input[name="setFeeMode"]').forEach(r=>r.addEventListener("change",()=>{
     $("rateHead").textContent=r.value==="sheet"?"장당 단가(원)":"컷당 단가(원)";
     syncSettingsUI();
@@ -3448,7 +3450,7 @@
   // ===== v79 시작 화면: 로그인 필수 =====
   (function(){
     const el=$("intro");
-    const cachedUid=()=>{ try{ return localStorage.getItem("jn_auth_uid"); }catch(e){ return null; } };
+    const cachedUid=()=>{ try{ return localStorage.getItem("jn_auth_uid")||sessionStorage.getItem("jn_auth_uid"); }catch(e){ return null; } };
     window.jnIntroClose=()=>{};
     if(!el) return;
     if(document.documentElement.classList.contains("no-intro")){ el.remove(); return; }
@@ -3583,10 +3585,11 @@
     $("outSave").textContent=pdf?"저장":"사진으로 저장";
     $("outTrack").innerHTML=canvases.map((c,i)=>`<div class="out-slide"><img src="${c.toDataURL("image/jpeg",0.85)}" alt="도면 ${i+1}"></div>`).join("");
     const mobileShare=isTouchDevice() && !!(navigator.canShare && navigator.canShare({files}));
+    const canShareFiles=!!(navigator.canShare && navigator.canShare({files}));
+    $("outCopy").hidden=pdf || isTouchDevice() || !(navigator.clipboard && window.ClipboardItem);
     $("outPrev").hidden=$("outNext").hidden=canvases.length<2;
-    $("outHint").textContent=mobileShare?"":isTouchDevice()?(pdf?"이 브라우저는 공유 창을 지원하지 않아 저장으로 처리돼요.":"공유를 누르면 도면이 복사돼요. 보낼 곳에서 길게 눌러 붙여 넣으세요."):(pdf?"공유를 누르면 공유 창이 열리거나, 안 되면 다운로드 폴더에 저장돼요."
-      :(canvases.length>1?"공유를 누르면 보고 있는 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요. 옆으로 넘겨 다른 장도 복사할 수 있어요."
-      :"공유를 누르면 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요."));
+    $("outHint").textContent=canShareFiles?"":(pdf?"이 브라우저는 공유 창을 지원하지 않아 저장으로 처리돼요."
+      :(isTouchDevice()?"공유를 누르면 도면이 복사돼요. 보낼 곳에서 길게 눌러 붙여 넣으세요.":"이 브라우저는 공유 창을 지원하지 않아 공유를 누르면 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요."));
     $("outTrack").scrollLeft=0; syncOutCount();
     const bd=$("outBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
   }
@@ -3597,7 +3600,7 @@
   const outGo=d=>{ const t=$("outTrack"); t.scrollTo({left:(outIndex()+d)*t.clientWidth,behavior:"smooth"}); };
   $("outPrev").addEventListener("click",()=>outGo(-1));
   $("outNext").addEventListener("click",()=>outGo(1));
-  $("outBackdrop").addEventListener("click",e=>{ if(e.target===$("outBackdrop")) closeOut(); });
+
   document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("outBackdrop").hidden) closeOut(); });
   $("outSave").addEventListener("click",()=>{
     if(!outState) return;
@@ -3605,27 +3608,24 @@
     files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
     savedToast(files.length,kind==="pdf");
   });
+  async function copyCurrent(){
+    const {png}=outState;
+    const i=Math.min(outIndex(),png.length-1);
+    await navigator.clipboard.write([new ClipboardItem({"image/png":png[i]})]);
+    toast(png.length>1?`${i+1}번째 도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.`:"도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.");
+  }
+  $("outCopy").addEventListener("click",async()=>{ if(!outState) return; try{ await copyCurrent(); }catch(e){ console.warn(e); toast("복사하지 못했어요. 사진으로 저장을 눌러 주세요."); } });
   $("outShare").addEventListener("click",async()=>{
     if(!outState) return;
-    const {files,kind,png}=outState;
-    const canShareFiles=!!(navigator.canShare && navigator.canShare({files}));
-    // 폰: 공유 창
-    if(isTouchDevice() && canShareFiles){
+    const {files,kind}=outState;
+    // 공유 창 (폰·PC 공통)
+    if(navigator.canShare && navigator.canShare({files})){
       try{ await navigator.share({files,title:files[0].name}); }catch(e){ if(!(e&&e.name==="AbortError")) toast("공유하지 못했어요. 저장을 눌러 주세요."); }
       return;
     }
-    // PC 이미지: 보고 있는 도면을 복사
+    // 공유 창이 없는 브라우저: 이미지는 복사, PDF는 저장
     if(kind!=="pdf" && navigator.clipboard && window.ClipboardItem){
-      try{
-        const i=Math.min(outIndex(),png.length-1);
-        await navigator.clipboard.write([new ClipboardItem({"image/png":png[i]})]);
-        toast(png.length>1?`${i+1}번째 도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.`:"도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.");
-        return;
-      }catch(e){ console.warn(e); }
-    }
-    // PC PDF 등: 공유 창이 되면 공유, 안 되면 저장
-    if(canShareFiles){
-      try{ await navigator.share({files,title:files[0].name}); return; }catch(e){ if(e&&e.name==="AbortError") return; }
+      try{ await copyCurrent(); return; }catch(e){ console.warn(e); }
     }
     files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
     savedToast(files.length,kind==="pdf");
@@ -3648,7 +3648,16 @@
     const JOBS_KEY="jn_jobs_v1", CUR_KEY="jn_current_v1";
     let auth=null, db=null, user=null, fbReady=null, unsubJobs=null, cloudJobs=[], justLoggedIn=false, gating=false, authStep="login";
     const UID_KEY="jn_auth_uid";
-    const cachedUid=()=>{ try{ return localStorage.getItem(UID_KEY); }catch(e){ return null; } };
+    const cachedUid=()=>{ try{ return localStorage.getItem(UID_KEY)||sessionStorage.getItem(UID_KEY); }catch(e){ return null; } };
+    const clearUid=()=>{ try{ localStorage.removeItem(UID_KEY); sessionStorage.removeItem(UID_KEY); }catch(e){} };
+    const keepLogin=()=>!!($("authKeep") && $("authKeep").checked);
+    let pendingCo="";
+    function applyPersistence(){
+      if(!auth) return Promise.resolve();
+      const P=firebase.auth.Auth && firebase.auth.Auth.Persistence;
+      if(!P) return Promise.resolve();
+      return auth.setPersistence(keepLogin()?P.LOCAL:P.SESSION).catch(e=>console.warn(e));
+    }
     let currentJobId=null, dirty=false, restoring=false;
 
     // ----- Firebase 불러오기 (백그라운드) -----
@@ -3681,8 +3690,8 @@
       if(!confirm("로그아웃할까요?\n계정에 저장된 작업과 설정은 그대로 남아 있어요.")) return;
       try{ if(auth) await auth.signOut(); }catch(e){}
       try{
-        [UID_KEY,"woodcutter_settings_v2",CUR_KEY,JOBS_KEY,"jn_intro_done"].forEach(k=>localStorage.removeItem(k));
-        sessionStorage.removeItem("jn_intro_seen");
+        [UID_KEY,"woodcutter_settings_v2",CUR_KEY,JOBS_KEY,"jn_intro_done","jn_data_uid"].forEach(k=>localStorage.removeItem(k));
+        sessionStorage.removeItem("jn_intro_seen"); sessionStorage.removeItem(UID_KEY);
       }catch(e){}
       location.reload();
     };
@@ -3694,10 +3703,26 @@
       updateAuthUI(); renderIfOpen();
       if(!user){
         // 이 기기에 로그인 기록이 있었는데 계정이 풀린 경우: 다시 로그인 받기
-        if(cachedUid()){ try{ localStorage.removeItem(UID_KEY); }catch(e){} gate(); }
+        if(cachedUid()){ clearUid(); gate(); }
         return;
       }
-      try{ localStorage.setItem(UID_KEY,user.uid); }catch(e){}
+      // 로그인 기록: '로그인 상태 유지'면 계속, 아니면 브라우저 닫을 때까지
+      try{
+        if(localStorage.getItem(UID_KEY)===user.uid || (!sessionStorage.getItem(UID_KEY) && keepLogin())){ localStorage.setItem(UID_KEY,user.uid); sessionStorage.removeItem(UID_KEY); }
+        else { sessionStorage.setItem(UID_KEY,user.uid); localStorage.removeItem(UID_KEY); }
+      }catch(e){}
+      // 같은 기기를 다른 계정이 쓰던 경우: 이전 사람의 정보는 지움
+      try{
+        const owner=localStorage.getItem("jn_data_uid");
+        if(owner && owner!==user.uid){
+          [CUR_KEY,JOBS_KEY,"woodcutter_settings_v2"].forEach(k=>localStorage.removeItem(k));
+          settings={...cloneDefaults(), companyName:pendingCo||""};
+          applyBranding();
+          if(parts.length||$("siteName").value) clearToNew(true);
+        }
+        localStorage.setItem("jn_data_uid",user.uid);
+      }catch(e){ console.warn(e); }
+      pendingCo="";
       try{
         const snap=await userDoc().collection("meta").doc("settings").get();
         if(snap.exists){
@@ -3776,6 +3801,7 @@
       $("authCompany").hidden=!(signup||co);
       $("authFoot").textContent=co?"":"입력한 이메일은 로그인과 작업 저장에만 쓰여요.";
       $("authForgot").hidden=signup||co;
+      $("authKeepRow").hidden=co;
       $("authClose").style.visibility=gating?"hidden":"";
       $("authPw").setAttribute("autocomplete",signup?"new-password":"current-password");
       $("authErr").textContent="";
@@ -3785,7 +3811,8 @@
       if(mode) document.querySelector(`input[name="authMode"][value="${mode}"]`).checked=true;
       syncAuthMode();
       const bd=$("authBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
-      initFirebase().catch(()=>{ $("authErr").textContent="로그인 서비스에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; });
+      $("authKeep").checked=isTouchDevice();
+      initFirebase().then(applyPersistence).catch(()=>{ $("authErr").textContent="로그인 서비스에 연결하지 못했어요. 인터넷 연결을 확인해 주세요."; });
     }
     function closeAuth(){ const bd=$("authBackdrop"); if(bd.hidden) return; if(gating && !(user && authStep!=="company" && (settings.companyName||"").trim())) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
     window.jnOpenAuth=openAuth;
@@ -3816,9 +3843,11 @@
           if(pw!==$("authPw2").value){ $("authErr").textContent="비밀번호 확인이 달라요."; justLoggedIn=false; return; }
           const co=$("authCompany").value.trim();
           if(!co){ $("authErr").textContent="업체명을 입력해 주세요."; justLoggedIn=false; return; }
-          settings.companyName=co; persistSettings(); applyBranding();
+          settings.companyName=co; pendingCo=co; persistSettings(); applyBranding();
+          await applyPersistence();
           await auth.createUserWithEmailAndPassword(email,pw);
         }else{
+          await applyPersistence();
           await auth.signInWithEmailAndPassword(email,pw);
         }
         $("authPw").value=""; $("authPw2").value="";
@@ -3834,8 +3863,9 @@
       catch(e){ showErr(e); }
     });
     document.querySelectorAll('input[name="authMode"]').forEach(r=>r.addEventListener("change",syncAuthMode));
+    $("authKeep").addEventListener("change",applyPersistence);
     $("authClose").addEventListener("click",closeAuth);
-    $("authBackdrop").addEventListener("click",e=>{ if(e.target===$("authBackdrop")) closeAuth(); });
+
     const logout=()=>window.jnLogoutAndReset();
 
     // 로그인 상태에 따라 버튼·문구 바꾸기
@@ -3952,7 +3982,7 @@
       });
     }
 
-    function clearToNew(){
+    function clearToNew(silent){
       parts=[]; calcMode="target";
       document.querySelector('input[name="calcMode"][value="target"]').checked=true;
       $("siteName").value="";$("boardW").value=1220;$("boardH").value=2440;$("boardT").value=18;$("edgeTrimInput").value=20;
@@ -3960,7 +3990,7 @@
       restoring=true; renderParts(); resetResult(); updateModeUI(); setTimeout(()=>{ restoring=false; },300);
       currentJobId=null; dirty=false; persistCurrentNow();
       if(typeof setView==="function" && isNarrow()) setView("input");
-      toast("새 작업을 시작했어요.");
+      if(!silent) toast("새 작업을 시작했어요.");
     }
     async function startNew(){
       if(dirty && parts.length){
@@ -4007,7 +4037,7 @@
     $("jobsAccount").addEventListener("click",e=>{ if(e.target.closest("[data-auth]")){ closeJobs(); setTimeout(()=>openAuth("login"),230); } });
     $("saveBtn").addEventListener("click",openJobs);
     $("jobsClose").addEventListener("click",closeJobs);
-    $("jobsBackdrop").addEventListener("click",e=>{ if(e.target===$("jobsBackdrop")) closeJobs(); });
+
     $("jobSave").addEventListener("click",()=>saveJob(false));
     $("jobSaveAs").addEventListener("click",()=>saveJob(true));
     $("jobName").addEventListener("keydown",e=>{ if(e.key==="Enter") saveJob(false); });
@@ -5072,6 +5102,20 @@
   body:has(.settings-backdrop:not([hidden])) .toast.show,
   body:has(#askSheet:not([hidden])) .toast.show{transform:translate(-50%,0)}
   @media print{.toast{display:none!important}}
+</style>
+
+<style>
+  /* ===== v82: 닫기 버튼 · 로그인 상태 유지 · 이미지 복사 ===== */
+  .x-btn{justify-self:end;width:36px;height:36px;border-radius:50%;border:0;background:rgba(118,118,128,.14);color:#3C3C43;
+    font-size:17px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;font-family:inherit}
+  .x-btn:hover{background:rgba(118,118,128,.22)}
+  .x-btn:active{transform:scale(.94)}
+  .out-count{justify-self:start!important;text-align:left!important}
+  .auth-keep{display:flex;align-items:center;gap:9px;margin:12px 20px 0;font-size:15px;font-weight:600;color:#3C3C43;cursor:pointer;user-select:none}
+  .auth-keep[hidden]{display:none!important}
+  .auth-keep input{width:20px;height:20px;accent-color:var(--blue);margin:0;cursor:pointer}
+  .out-copy{display:block;width:100%;margin-top:10px;border:0;background:none;color:var(--blue);font-size:14px;font-weight:600;padding:6px;cursor:pointer;font-family:inherit}
+  .out-copy[hidden]{display:none!important}
 </style>
 </body>
 </html>
