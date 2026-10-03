@@ -3762,6 +3762,14 @@
       unsubJobs=userDoc().collection("jobs").onSnapshot(qs=>{
         cloudJobs=qs.docs.map(d=>{ const x=d.data(); let data={}; try{ data=JSON.parse(x.json||"{}"); }catch(e){} return {id:d.id,name:x.name||"이름 없음",savedAt:x.savedAt||"",sheets:x.sheets??null,data}; });
         renderIfOpen();
+        // 다른 기기에서 같은 작업을 더 최근에 고쳤다면 최신 내용으로 바꿈
+        if(currentJobId && !dirty && !jobSaving){
+          const cj=cloudJobs.find(j=>j.id===currentJobId);
+          if(cj && cj.savedAt && cj.savedAt>(baseSavedAt||"")){
+            baseSavedAt=cj.savedAt;
+            applyData(cj.data,`"${cj.name}"을 다른 기기에서 고친 최신 내용으로 불러왔어요.`);
+          }
+        }
       },e=>console.error(e));
       if(justLoggedIn){ toast(`${user.email||"계정"}으로 로그인했어요.`); justLoggedIn=false; }
       // 인터넷이 끊겼을 때 이 기기에 저장한 작업은 자동으로 계정에 올림
@@ -3928,8 +3936,27 @@
 
     // 자동 저장: 지금 작업을 이 기기에 계속 남김
     let t=null;
-    const persistCurrentNow=()=>{ try{ localStorage.setItem(CUR_KEY,JSON.stringify({jobId:currentJobId,dirty,data:projectData()})); }catch(e){} };
-    function autosave(){ if(restoring) return; dirty=true; clearTimeout(t); t=setTimeout(persistCurrentNow,400); }
+    let baseSavedAt="";
+    const persistCurrentNow=()=>{ try{ localStorage.setItem(CUR_KEY,JSON.stringify({jobId:currentJobId,dirty,baseSavedAt,data:projectData()})); }catch(e){} };
+    // 저장된 작업을 고치면 몇 초 뒤 자동으로 계정(작업 목록)에 저장
+    let jt=null, jobSaving=false;
+    function scheduleJobAutosave(){
+      if(!currentJobId) return;
+      clearTimeout(jt);
+      jt=setTimeout(async()=>{
+        if(restoring||jobSaving||!currentJobId||!dirty) return;
+        const cur=allJobs().find(j=>j.id===currentJobId); if(!cur) return;
+        jobSaving=true;
+        try{ if(await saveJob(false,{quiet:true,name:cur.name})) flashSaved(); }
+        finally{ jobSaving=false; }
+      },2500);
+    }
+    function flashSaved(){
+      const b=$("resultSaveBtn"); if(!b) return;
+      b.textContent="✓ 자동 저장됨"; b.classList.add("saved-flash");
+      clearTimeout(b._t); b._t=setTimeout(()=>{ b.textContent="작업 저장"; b.classList.remove("saved-flash"); },2200);
+    }
+    function autosave(){ if(restoring) return; dirty=true; clearTimeout(t); t=setTimeout(persistCurrentNow,400); scheduleJobAutosave(); }
     const left=document.querySelector(".left-panel")||document;
     left.addEventListener("input",autosave);
     left.addEventListener("change",autosave);
@@ -3972,18 +3999,18 @@
     function openJobs(){ render(); const bd=$("jobsBackdrop"); bd.classList.remove("closing"); bd.hidden=false; bd.querySelector(".settings-body").scrollTop=0; }
     function closeJobs(){ const bd=$("jobsBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
 
-    async function saveJob(asNew){
-      if(!parts.length && !$("siteName").value.trim()){ toast("저장할 내용이 없어요. 부품을 먼저 넣어 주세요."); return false; }
-      const name=($("jobName").value||"").trim()||defaultName();
+    async function saveJob(asNew,opt={}){
+      if(!parts.length && !$("siteName").value.trim()){ if(!opt.quiet) toast("저장할 내용이 없어요. 부품을 먼저 넣어 주세요."); return false; }
+      const name=opt.name||($("jobName").value||"").trim()||defaultName();
       const data=projectData(); delete data.settings;
       const existing=(!asNew && currentJobId)?allJobs().find(j=>j.id===currentJobId):null;
       const job={id:existing?existing.id:uid(),name,savedAt:new Date().toISOString(),sheets:resultSheets(lastResult),data};
       try{
         if(user) await cloudSave(job);
         else{ const list=loadLocalJobs().filter(j=>j.id!==job.id); list.push(job); if(!saveLocalJobs(list)) return false; }
-      }catch(e){ console.error(e); alert("저장하지 못했어요. 인터넷 연결을 확인해 주세요."); return false; }
-      currentJobId=job.id; dirty=false; persistCurrentNow();
-      toast(`"${name}" 저장했어요.`);
+      }catch(e){ console.error(e); if(!opt.quiet) alert("저장하지 못했어요. 인터넷 연결을 확인해 주세요."); return false; }
+      currentJobId=job.id; dirty=false; baseSavedAt=job.savedAt; persistCurrentNow();
+      if(!opt.quiet) toast(`"${name}" 저장했어요.`);
       renderIfOpen();
       return true;
     }
@@ -4037,7 +4064,7 @@
         if(!v) return false;
         if(v==="save"){ if(!(await saveJob(false))) return false; }
       }
-      currentJobId=job.id; dirty=false;
+      currentJobId=job.id; dirty=false; baseSavedAt=job.savedAt||"";
       applyData(job.data,`"${job.name}"을 불러왔어요.`);
       closeJobs();
       return true;
@@ -4090,7 +4117,7 @@
       try{
         const cur=JSON.parse(localStorage.getItem(CUR_KEY)||"null");
         if(cur && cur.data && ((cur.data.parts||[]).length || cur.data.siteName)){
-          currentJobId=cur.jobId||null;
+          currentJobId=cur.jobId||null; baseSavedAt=cur.baseSavedAt||"";
           applyData(cur.data,"하던 작업을 이어서 불러왔어요.");
           dirty=!!cur.dirty;
         }
@@ -5153,6 +5180,11 @@
   /* ===== v84: 홈 누르는 범위 ===== */
   .brand{touch-action:manipulation}
   .brand .app-logo,.brand .brand-title{cursor:pointer}
+</style>
+
+<style>
+  /* ===== v85: 자동 저장 표시 ===== */
+  #resultSaveBtn.saved-flash{color:#1E9E50!important;border-color:rgba(30,158,80,.35)!important}
 </style>
 </body>
 </html>
