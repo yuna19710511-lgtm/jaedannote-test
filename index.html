@@ -899,7 +899,7 @@
         </div>
         <div class="toolbar-actions">
           <button class="btn btn-outline" id="previewBtn" type="button">첫 도면으로</button>
-          <button class="btn btn-outline" id="resultSaveBtn" type="button">저장</button>
+          <button class="btn btn-outline" id="resultSaveBtn" type="button">작업 저장</button>
           <button class="btn btn-outline" id="imgBtn" type="button">보내기</button>
           <button class="btn btn-primary" id="pdfBtn" type="button">PDF</button>
         </div>
@@ -1047,18 +1047,40 @@
           <label><input type="radio" name="authMode" value="signup"><span>회원가입</span></label>
         </div>
       </div>
-      <div class="ios-group">
-        <label class="ios-row"><span class="ios-label">이메일</span><input class="ios-input" id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="name@example.com"></label>
-        <label class="ios-row"><span class="ios-label">비밀번호</span><input class="ios-input" id="authPw" type="password" autocomplete="current-password" placeholder="6자 이상"></label>
-        <label class="ios-row" id="authPw2Row" hidden><span class="ios-label">비밀번호 확인</span><input class="ios-input" id="authPw2" type="password" autocomplete="new-password" placeholder="한 번 더"></label>
-        <label class="ios-row" id="authCoRow" hidden><span class="ios-label">업체명</span><input class="ios-input" id="authCompany" type="text" autocomplete="organization" placeholder="예: ○○목재"></label>
+      <div class="auth-fields">
+        <input class="auth-input" id="authEmail" type="email" inputmode="email" autocomplete="email" placeholder="이메일" aria-label="이메일">
+        <input class="auth-input" id="authPw" type="password" autocomplete="current-password" placeholder="비밀번호 (6자 이상)" aria-label="비밀번호">
+        <input class="auth-input" id="authPw2" type="password" autocomplete="new-password" placeholder="비밀번호 확인" aria-label="비밀번호 확인" hidden>
+        <input class="auth-input" id="authCompany" type="text" autocomplete="off" placeholder="업체명을 입력해 주세요" aria-label="업체명" hidden>
       </div>
       <p class="auth-err" id="authErr" role="alert"></p>
       <div class="auth-wrap">
         <button class="auth-submit" id="authSubmit" type="button">로그인</button>
         <button class="auth-link" id="authForgot" type="button">비밀번호를 잊었어요</button>
       </div>
-      <p class="ios-foot last">입력한 이메일은 로그인과 작업 저장에만 쓰여요.</p>
+      <p class="ios-foot last" id="authFoot">입력한 이메일은 로그인과 작업 저장에만 쓰여요.</p>
+    </div>
+  </div>
+</div>
+
+<div class="settings-backdrop out-backdrop" id="outBackdrop" hidden>
+  <div class="settings-modal out-modal" role="dialog" aria-modal="true" aria-labelledby="outTitle">
+    <div class="settings-head">
+      <button class="nav-btn" id="outClose" type="button">닫기</button>
+      <h2 id="outTitle">미리보기</h2>
+      <span class="nav-btn out-count" id="outCount"></span>
+    </div>
+    <div class="out-body">
+      <div class="out-track" id="outTrack"></div>
+      <button class="out-nav prev" id="outPrev" type="button" aria-label="이전 도면">‹</button>
+      <button class="out-nav next" id="outNext" type="button" aria-label="다음 도면">›</button>
+    </div>
+    <div class="out-actions">
+      <p class="out-hint" id="outHint"></p>
+      <div class="out-btns">
+        <button class="out-btn" id="outSave" type="button">사진으로 저장</button>
+        <button class="out-btn strong" id="outShare" type="button">공유</button>
+      </div>
     </div>
   </div>
 </div>
@@ -3542,27 +3564,73 @@
           files.push(new File([b],canvases.length>1?`${base}_${i+1}.jpg`:`${base}.jpg`,{type:"image/jpeg"}));
         }
       }
-      const canShare=!!(navigator.canShare && navigator.canShare({files}));
-      if(canShare && isTouchDevice()){
-        const v=await jnAsk(
-          kind==="pdf"?"PDF가 준비됐어요":`도면 이미지 ${files.length}장이 준비됐어요`,
-          kind==="pdf"?files[0].name:"카톡을 고르면 사진으로 보내져요.",
-          [{label:"카톡 등으로 보내기",value:"share",strong:true},{label:kind==="pdf"?"휴대폰에 저장":"사진으로 저장",value:"save"}]
-        );
-        if(v==="share"){
-          try{ await navigator.share({files,title:files[0].name}); }
-          catch(e){ if(!(e&&e.name==="AbortError")) files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300)); }
-        }else if(v==="save") files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
-      }else{
-        files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
-        toast(kind==="pdf"?"PDF를 저장했어요.":`도면 이미지 ${files.length}장을 저장했어요.`);
-      }
+      openOutPreview(kind,canvases,files);
     }catch(e){
       console.error(e);
       if(kind==="pdf"){ toast("PDF 파일을 만들지 못해서 인쇄 화면으로 열게요."); setTimeout(printPDF,400); }
       else toast("이미지를 만들지 못했어요. 인터넷 연결을 확인해 주세요.");
     }finally{ outBusy=false; btn.textContent=old; btn.disabled=false; }
   }
+  // ----- 미리보기 창: 공유 / 저장 -----
+  let outState=null;
+  const canvasToPng=c=>new Promise(r=>c.toBlob(r,"image/png"));
+  function outIndex(){ const t=$("outTrack"); return Math.round(t.scrollLeft/Math.max(1,t.clientWidth)); }
+  function syncOutCount(){ if(!outState) return; const n=outState.canvases.length; $("outCount").textContent=n>1?`${outIndex()+1} / ${n}`:""; }
+  function openOutPreview(kind,canvases,files){
+    const pdf=kind==="pdf";
+    outState={kind,canvases,files,png:pdf?null:canvases.map(c=>canvasToPng(c))};
+    $("outTitle").textContent=pdf?`PDF 미리보기 · ${canvases.length}쪽`:`도면 이미지 · ${canvases.length}장`;
+    $("outSave").textContent=pdf?"저장":"사진으로 저장";
+    $("outTrack").innerHTML=canvases.map((c,i)=>`<div class="out-slide"><img src="${c.toDataURL("image/jpeg",0.85)}" alt="도면 ${i+1}"></div>`).join("");
+    const mobileShare=isTouchDevice() && !!(navigator.canShare && navigator.canShare({files}));
+    $("outPrev").hidden=$("outNext").hidden=canvases.length<2;
+    $("outHint").textContent=mobileShare?"":isTouchDevice()?(pdf?"이 브라우저는 공유 창을 지원하지 않아 저장으로 처리돼요.":"공유를 누르면 도면이 복사돼요. 보낼 곳에서 길게 눌러 붙여 넣으세요."):(pdf?"공유를 누르면 공유 창이 열리거나, 안 되면 다운로드 폴더에 저장돼요."
+      :(canvases.length>1?"공유를 누르면 보고 있는 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요. 옆으로 넘겨 다른 장도 복사할 수 있어요."
+      :"공유를 누르면 도면이 복사돼요. 원하는 곳에 Ctrl+V로 붙여 넣으세요."));
+    $("outTrack").scrollLeft=0; syncOutCount();
+    const bd=$("outBackdrop"); bd.classList.remove("closing"); bd.hidden=false;
+  }
+  function closeOut(){ const bd=$("outBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); $("outTrack").innerHTML=""; outState=null; },220); }
+  function savedToast(n,pdf){ toast(isTouchDevice()?(pdf?"PDF를 저장했어요.":`사진 ${n}장을 저장했어요.`):(pdf?"PDF를 다운로드 폴더에 저장했어요.":`도면 ${n}장을 다운로드 폴더에 저장했어요.`)); }
+  $("outTrack").addEventListener("scroll",()=>{ clearTimeout(window.__outT); window.__outT=setTimeout(syncOutCount,60); },{passive:true});
+  $("outClose").addEventListener("click",closeOut);
+  const outGo=d=>{ const t=$("outTrack"); t.scrollTo({left:(outIndex()+d)*t.clientWidth,behavior:"smooth"}); };
+  $("outPrev").addEventListener("click",()=>outGo(-1));
+  $("outNext").addEventListener("click",()=>outGo(1));
+  $("outBackdrop").addEventListener("click",e=>{ if(e.target===$("outBackdrop")) closeOut(); });
+  document.addEventListener("keydown",e=>{ if(e.key==="Escape" && !$("outBackdrop").hidden) closeOut(); });
+  $("outSave").addEventListener("click",()=>{
+    if(!outState) return;
+    const {files,kind}=outState;
+    files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
+    savedToast(files.length,kind==="pdf");
+  });
+  $("outShare").addEventListener("click",async()=>{
+    if(!outState) return;
+    const {files,kind,png}=outState;
+    const canShareFiles=!!(navigator.canShare && navigator.canShare({files}));
+    // 폰: 공유 창
+    if(isTouchDevice() && canShareFiles){
+      try{ await navigator.share({files,title:files[0].name}); }catch(e){ if(!(e&&e.name==="AbortError")) toast("공유하지 못했어요. 저장을 눌러 주세요."); }
+      return;
+    }
+    // PC 이미지: 보고 있는 도면을 복사
+    if(kind!=="pdf" && navigator.clipboard && window.ClipboardItem){
+      try{
+        const i=Math.min(outIndex(),png.length-1);
+        await navigator.clipboard.write([new ClipboardItem({"image/png":png[i]})]);
+        toast(png.length>1?`${i+1}번째 도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.`:"도면을 복사했어요. 원하는 곳에 Ctrl+V로 붙여 넣으세요.");
+        return;
+      }catch(e){ console.warn(e); }
+    }
+    // PC PDF 등: 공유 창이 되면 공유, 안 되면 저장
+    if(canShareFiles){
+      try{ await navigator.share({files,title:files[0].name}); return; }catch(e){ if(e&&e.name==="AbortError") return; }
+    }
+    files.forEach((f,i)=>setTimeout(()=>downloadBlob(f,f.name),i*300));
+    savedToast(files.length,kind==="pdf");
+  });
+
   $("pdfBtn").addEventListener("click",()=>deliverOutput("pdf"));
   $("imgBtn").addEventListener("click",()=>deliverOutput("img"));
 
@@ -3693,7 +3761,7 @@
     };
     const showErr=e=>{ if(!e||["auth/popup-closed-by-user","auth/cancelled-popup-request"].includes(e.code)) { $("authErr").textContent=""; return; } $("authErr").textContent=AUTH_MSG[e.code]||`로그인하지 못했어요. (${e.code||e.message})`; };
     const authMode=()=>document.querySelector('input[name="authMode"]:checked').value;
-    function setStep(step){ authStep=step; syncAuthMode(); if(step==="company") setTimeout(()=>$("authCompany").focus(),50); }
+    function setStep(step){ authStep=step; if(step==="company") $("authCompany").value=""; syncAuthMode(); if(step==="company") setTimeout(()=>$("authCompany").focus(),50); }
     function syncAuthMode(){
       const co=authStep==="company";
       const signup=!co && authMode()==="signup";
@@ -3702,10 +3770,11 @@
         :(gating?"재단노트는 로그인 후 사용할 수 있어요. 폰과 PC에서 같은 작업 목록을 볼 수 있어요.":"로그인하면 폰과 PC에서 같은 작업 목록과 업체 설정을 볼 수 있어요.");
       $("authSubmit").textContent=co?"시작하기":(signup?"가입하기":"로그인");
       document.querySelectorAll("#authModal .auth-wrap")[0].hidden=co;
-      $("authEmail").closest(".ios-row").hidden=co;
-      $("authPw").closest(".ios-row").hidden=co;
-      $("authPw2Row").hidden=!signup;
-      $("authCoRow").hidden=!(signup||co);
+      $("authEmail").hidden=co;
+      $("authPw").hidden=co;
+      $("authPw2").hidden=!signup;
+      $("authCompany").hidden=!(signup||co);
+      $("authFoot").textContent=co?"":"입력한 이메일은 로그인과 작업 저장에만 쓰여요.";
       $("authForgot").hidden=signup||co;
       $("authClose").style.visibility=gating?"hidden":"";
       $("authPw").setAttribute("autocomplete",signup?"new-password":"current-password");
@@ -4958,6 +5027,41 @@
     .auth-backdrop.gate{align-items:flex-end!important;padding-bottom:5vh!important}
     .auth-backdrop.gate .settings-modal{max-height:calc(100dvh - 280px)!important}
   }
+</style>
+
+<style>
+  /* ===== v80: 로그인 칸 · 미리보기 ===== */
+  .auth-fields{margin:0 16px;display:flex;flex-direction:column;gap:10px}
+  .auth-input{width:100%;box-sizing:border-box;height:52px;padding:0 16px;border-radius:12px;border:1px solid rgba(60,60,67,.18);background:#fff;
+    font-size:16px;font-weight:500;color:#000;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s}
+  .auth-input::placeholder{color:#A1A1A6;font-weight:500}
+  .auth-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,92,240,.15)}
+  .auth-input[hidden]{display:none!important}
+  .out-backdrop{z-index:2400}
+  .out-modal{display:flex!important;flex-direction:column;width:min(760px,100%)!important;max-height:min(860px,calc(100dvh - 40px))!important}
+  .out-count{font-size:14px!important;color:#8A8A8E!important;font-weight:600!important;justify-self:end}
+  .out-body{flex:1 1 auto;min-height:0;padding:14px 0 6px;background:#E9E9EE;position:relative}
+  .out-nav{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.92);
+    box-shadow:0 4px 14px rgba(15,27,45,.2);font-size:26px;line-height:1;color:#0F1B2D;cursor:pointer;display:flex;align-items:center;justify-content:center;padding-bottom:3px}
+  .out-nav.prev{left:6px} .out-nav.next{right:6px}
+  .out-nav[hidden]{display:none!important}
+  @media (pointer:coarse){ .out-nav{display:none!important} }
+  .out-track{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;height:100%;scrollbar-width:none}
+  .out-track::-webkit-scrollbar{display:none}
+  .out-slide{flex:0 0 100%;scroll-snap-align:center;display:flex;align-items:center;justify-content:center;padding:0 14px;box-sizing:border-box}
+  .out-slide img{max-width:100%;max-height:min(62dvh,560px);border-radius:8px;box-shadow:0 6px 24px rgba(15,27,45,.18);background:#fff}
+  .out-actions{flex:0 0 auto;padding:12px 16px calc(14px + env(safe-area-inset-bottom));background:#F2F2F7;border-top:.5px solid rgba(60,60,67,.22)}
+  .out-hint{margin:0 4px 10px;font-size:13px;line-height:1.45;color:#6D6D72;word-break:keep-all}
+  .out-hint:empty{display:none}
+  .out-btns{display:flex;gap:10px}
+  .out-btn{flex:1;height:52px;border-radius:14px;border:1px solid rgba(60,60,67,.18);background:#fff;font-size:16.5px;font-weight:700;color:var(--blue);cursor:pointer;font-family:inherit}
+  .out-btn.strong{border:0;background:linear-gradient(180deg,#2F7BFF,#0A5CF0);color:#fff;box-shadow:0 8px 22px rgba(10,92,240,.28)}
+  .out-btn:active{transform:scale(.98)}
+  @media (max-width:640px){
+    .out-modal{height:calc(100dvh - 10px - env(safe-area-inset-top))!important;max-height:none!important}
+    .out-slide img{max-height:none;max-width:100%}
+  }
+  @media print{.out-backdrop{display:none!important}}
 </style>
 </body>
 </html>
