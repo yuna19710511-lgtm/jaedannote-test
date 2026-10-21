@@ -849,6 +849,24 @@
         <div class="input-kind" role="tablist">
           <button type="button" class="kind-btn active" data-kind="size">치수로</button>
           <button type="button" class="kind-btn" data-kind="div">등분으로</button>
+          <button type="button" class="kind-btn" data-kind="pat">도면대로</button>
+        </div>
+        <div class="pat-inputs" id="patInputs" hidden>
+          <div class="pat-dir" role="radiogroup" aria-label="첫 재단 방향">
+            <span class="pat-dir-label">먼저 자르는 방향</span>
+            <div class="pat-dir-btns">
+              <button type="button" class="pat-dir-btn active" data-dir="len">길이 방향으로 띠</button>
+              <button type="button" class="pat-dir-btn" data-dir="wid">폭 방향으로 띠</button>
+            </div>
+          </div>
+          <div class="pat-strips" id="patStrips"></div>
+          <button type="button" class="pat-add-strip" id="patAddStrip">+ 띠 추가</button>
+          <div class="pat-preview" id="patPreview"></div>
+          <div class="pat-bottom">
+            <div class="field"><label for="patBoards" id="patBoardsLabel">이 패턴 장수</label><input class="input" id="patBoards" type="number" inputmode="numeric" min="1" step="1" value="1"></div>
+            <button class="btn btn-primary add-btn" id="addPatBtn" type="button">추가</button>
+          </div>
+          <p class="pat-hint">도면에 적힌 치수 그대로 자르고, 원장은 늘리지 않아요. <b>나머지</b>는 남은 길이에서 톱날 두께를 빼고 계산해요. 숫자 없이 남는 부분은 자투리로 표시돼요.</p>
         </div>
         <div class="div-inputs" id="divInputs" hidden>
           <div class="field"><label for="divW" id="divWLabel">폭 ÷</label><input class="input" id="divW" type="number" inputmode="numeric" min="1" step="1" placeholder="예: 5"></div>
@@ -1323,6 +1341,12 @@
     tbody.innerHTML=parts.map((p,i)=>{
       const chip=`<span class="code-chip c${i%4}">${codeFor(i)}</span>`;
       const del=`<button class="delete-row" type="button" data-i="${i}" aria-label="${codeFor(i)} 삭제">삭제</button>`;
+      if(p.pat){
+        return `<tr class="pr">
+          <td class="pr-main">${chip}<span class="pr-text"><b class="pr-dim">도면대로 · 장당 ${p.patPer.toLocaleString()}조각</b><span class="pr-sub">${escapeText(p.patText)} · ${p.boardT.toLocaleString()}T</span></span></td>
+          <td class="pr-qty"><b>${p.patBoards.toLocaleString()}</b>장<span class="pr-sub">${(p.patBoards*p.patPer).toLocaleString()}조각</span></td>
+          <td class="pr-del">${del}</td></tr>`;
+      }
       if(p.div){
         const boards=divBoardsOf(p);
         return `<tr class="pr">
@@ -1671,7 +1695,9 @@
     document.querySelectorAll(".kind-btn").forEach(b=>b.classList.toggle("active",b.dataset.kind===kind));
     $("divInputs").hidden=kind!=="div";
     $("sizeInputs").hidden=kind!=="size";
+    $("patInputs").hidden=kind!=="pat";
     updateDivPreview();
+    if(kind==="pat") renderPatStrips();
   }
   function updateDivPreview(){
     const bw=Number($("boardW").value), bh=Number($("boardH").value), kerf=Number($("kerfInput").value)||0;
@@ -1710,6 +1736,229 @@
     resetResult();
     toast("등분 부품을 추가했습니다.");
     $("divW").focus();
+  }
+
+  // ===== v86: 도면대로 (패턴 고정) =====
+  // 좌표: x = 길이(2440) 방향, y = 폭(1220) 방향. 결과 도면과 같은 기준.
+  let patDir="len";
+  let patStrips=[{size:"",rest:false,rep:1,split:"none",list:"",n:2}];
+  const isRestToken=t=>/^(나머지|나|n|N|\*|r|R)$/.test(t);
+  const r1p=v=>Math.round(v*10)/10;
+
+  // "1090, 나머지" → [1090,null]
+  function parseSplitList(text){
+    const toks=String(text||"").split(/[,\s/]+/).map(t=>t.trim()).filter(Boolean);
+    const out=[];
+    for(const t of toks){
+      if(isRestToken(t)){ out.push(null); continue; }
+      const v=Number(t);
+      if(!(v>0)) return {error:`"${t}"는 치수로 읽을 수 없어요. 숫자나 '나머지'로 적어 주세요.`};
+      out.push(v);
+    }
+    if(!out.length) return {error:"나눌 치수를 적어 주세요."};
+    if(out.filter(v=>v===null).length>1) return {error:"한 띠 안에 '나머지'는 한 번만 쓸 수 있어요."};
+    return {sizes:out};
+  }
+
+  // 한 줄로 나열된 치수를 총길이 안에 배치. null = 나머지
+  function layoutLine(sizes,total,kerf){
+    const n=sizes.length;
+    const fixed=sizes.filter(v=>v!==null).reduce((a,b)=>a+b,0);
+    const hasRest=sizes.includes(null);
+    let rest=0;
+    if(hasRest){
+      rest=r1p(total-fixed-(n-1)*kerf);
+      if(!(rest>0)) return {error:`치수 합이 ${total.toLocaleString()}mm를 넘어서 '나머지'가 남지 않아요.`};
+    }else if(fixed+(n-1)*kerf>total+0.001){
+      return {error:`치수 합(톱날 포함)이 ${total.toLocaleString()}mm를 넘어요.`};
+    }
+    const segs=[]; let pos=0;
+    sizes.forEach((v,i)=>{
+      const s=v===null?rest:v;
+      segs.push({pos:r1p(pos),size:r1p(s),rest:v===null});
+      pos+=s+(i<n-1?kerf:0);
+    });
+    const end=pos;
+    const fills=hasRest || Math.abs(end-total)<0.5;
+    const scrap=fills?0:r1p(total-end-kerf);
+    return {segs,fills,scrap:scrap>0.5?scrap:0,end};
+  }
+
+  function buildPatternPlan(def,boardW,boardH,kerf){
+    const mainTotal=def.dir==="len"?boardH:boardW;   // 띠를 늘어놓는 방향
+    const crossTotal=def.dir==="len"?boardW:boardH;  // 띠 안에서 나누는 방향
+    const stripSizes=[], stripDefs=[];
+    def.strips.forEach(s=>{
+      const rep=Math.max(1,Math.floor(Number(s.rep)||1));
+      for(let k=0;k<rep;k++){ stripSizes.push(s.rest?null:Number(s.size)); stripDefs.push(s); }
+    });
+    if(!stripSizes.length) return {error:"띠를 하나 이상 넣어 주세요."};
+    if(stripSizes.filter(v=>v===null).length>1) return {error:"'나머지' 띠는 하나만 둘 수 있어요."};
+    if(stripSizes.some(v=>v!==null && !(v>0))) return {error:"띠 폭을 숫자로 넣어 주세요."};
+    const main=layoutLine(stripSizes,mainTotal,kerf);
+    if(main.error) return {error:main.error};
+
+    const pieces=[], leftovers=[], internalKeys=new Map();
+    const rect=(m0,mLen,c0,cLen)=>def.dir==="len"
+      ? {x:m0,y:c0,w:mLen,h:cLen}
+      : {x:c0,y:m0,w:cLen,h:mLen};
+
+    for(let i=0;i<main.segs.length;i++){
+      const seg=main.segs[i], sd=stripDefs[i];
+      let sizes;
+      if(sd.split==="list"){
+        const p=parseSplitList(sd.list);
+        if(p.error) return {error:`띠 ${i+1}: ${p.error}`};
+        sizes=p.sizes;
+      }else if(sd.split==="div"){
+        const n=Math.floor(Number(sd.n));
+        if(!(n>=2)) return {error:`띠 ${i+1}: 등분 수는 2 이상으로 넣어 주세요.`};
+        sizes=Array.from({length:n},()=>r1p((crossTotal-(n-1)*kerf)/n));
+      }else{
+        sizes=[crossTotal];
+      }
+      const line=layoutLine(sizes,crossTotal,kerf);
+      if(line.error) return {error:`띠 ${i+1}: ${line.error}`};
+      line.segs.forEach(c=>pieces.push(rect(seg.pos,seg.size,c.pos,c.size)));
+      if(line.scrap>0){
+        const c0=r1p(line.end);
+        const r=rect(seg.pos,seg.size,c0,r1p(crossTotal-c0));
+        const real=rect(0,seg.size,0,line.scrap);
+        r.rw=real.w; r.rh=real.h;
+        leftovers.push(r);
+      }
+      const cuts=sizes.length===1&&line.fills?0:(line.fills?line.segs.length-1:line.segs.length);
+      const key=line.segs.map(c=>c.pos+":"+c.size).join(",");
+      if(cuts>0 && !internalKeys.has(key)) internalKeys.set(key,cuts);
+    }
+    if(main.scrap>0){
+      const m0=r1p(main.end);
+      const r=rect(m0,r1p(mainTotal-m0),0,crossTotal);
+      const real=rect(0,main.scrap,0,crossTotal);
+      r.rw=real.w; r.rh=real.h;
+      leftovers.push(r);
+    }
+    const mainCuts=main.fills?main.segs.length-1:main.segs.length;
+    const cuts=mainCuts+[...internalKeys.values()].reduce((a,b)=>a+b,0);
+    return {pieces,leftovers,cuts:Math.max(1,cuts),stripCount:main.segs.length};
+  }
+
+  function patSizeLabel(p){ return `${r1p(p.h).toLocaleString()}×${r1p(p.w).toLocaleString()}`; }
+  function patSummary(plan){
+    const m=new Map();
+    plan.pieces.forEach(p=>{ const k=patSizeLabel(p); m.set(k,(m.get(k)||0)+1); });
+    return [...m.entries()].map(([k,c])=>`${k} × ${c}`).join(" · ");
+  }
+
+  function planPatternSheets(boardW,boardH,part,partIndex,kerf,boardsOverride){
+    const plan=buildPatternPlan(part.patDef,boardW,boardH,kerf);
+    if(plan.error) throw new Error(plan.error);
+    const make=()=>({
+      placed:plan.pieces.map(p=>({partIndex,code:codeFor(partIndex),x:p.x,y:p.y,w:p.w,h:p.h,rot:false})),
+      leftovers:plan.leftovers.map(f=>({
+        x:f.x,y:f.y,w:f.rw,h:f.rh,
+        displayX:f.x,displayY:f.y,displayW:f.w,displayH:f.h
+      })),
+      rows:[],
+      halfWidthStripFirst:true,
+      exactHalfSplit:false,
+      pattern:true,
+      stripFirstCuts:plan.cuts,
+      originalBoardW:boardW,
+      originalBoardH:boardH,
+      trimX:0,trimY:0,
+      usableLen:boardH,
+      usableWid:boardW
+    });
+    const n=boardsOverride ?? Math.max(1,Math.floor(part.patBoards||1));
+    return Array.from({length:n},make);
+  }
+
+  function readPatDef(){ return {dir:patDir,strips:patStrips.map(s=>({...s}))}; }
+
+  function renderPatStrips(){
+    const box=$("patStrips");
+    box.innerHTML=patStrips.map((s,i)=>`
+      <div class="pat-strip" data-i="${i}">
+        <div class="pat-row">
+          <span class="pat-no">띠 ${i+1}</span>
+          <input class="input pat-size" type="number" inputmode="decimal" min="1" placeholder="폭 mm" value="${s.rest?"":escapeText(String(s.size??""))}" ${s.rest?"disabled":""} aria-label="띠 ${i+1} 폭">
+          <button type="button" class="pat-rest${s.rest?" on":""}" aria-pressed="${s.rest}">나머지</button>
+          <span class="pat-x">×</span>
+          <input class="input pat-rep" type="number" inputmode="numeric" min="1" step="1" value="${s.rep||1}" aria-label="띠 ${i+1} 반복 개수">
+          <button type="button" class="pat-del" aria-label="띠 ${i+1} 삭제" ${patStrips.length<2?"disabled":""}>✕</button>
+        </div>
+        <div class="pat-row pat-row2">
+          <select class="input pat-split" aria-label="띠 ${i+1} 나누기">
+            <option value="none" ${s.split==="none"?"selected":""}>그대로</option>
+            <option value="list" ${s.split==="list"?"selected":""}>치수로 나누기</option>
+            <option value="div" ${s.split==="div"?"selected":""}>등분하기</option>
+          </select>
+          <input class="input pat-list" type="text" placeholder="예: 1090, 나머지" value="${escapeText(s.list||"")}" ${s.split==="list"?"":"hidden"} aria-label="띠 ${i+1} 나눌 치수">
+          <span class="pat-div" ${s.split==="div"?"":"hidden"}><input class="input pat-n" type="number" inputmode="numeric" min="2" step="1" value="${s.n||2}" aria-label="띠 ${i+1} 등분 수"><span>등분</span></span>
+        </div>
+      </div>`).join("");
+    box.querySelectorAll(".pat-strip").forEach(row=>{
+      const i=Number(row.dataset.i), s=patStrips[i];
+      row.querySelector(".pat-size").addEventListener("input",e=>{ s.size=e.target.value; updatePatPreview(); });
+      row.querySelector(".pat-rep").addEventListener("input",e=>{ s.rep=e.target.value; updatePatPreview(); });
+      row.querySelector(".pat-rest").addEventListener("click",()=>{ s.rest=!s.rest; renderPatStrips(); });
+      row.querySelector(".pat-del").addEventListener("click",()=>{ patStrips.splice(i,1); renderPatStrips(); });
+      row.querySelector(".pat-split").addEventListener("change",e=>{ s.split=e.target.value; renderPatStrips(); });
+      row.querySelector(".pat-list").addEventListener("input",e=>{ s.list=e.target.value; updatePatPreview(); });
+      row.querySelector(".pat-n").addEventListener("input",e=>{ s.n=e.target.value; updatePatPreview(); });
+    });
+    updatePatPreview();
+  }
+
+  function updatePatPreview(){
+    const bw=Number($("boardW").value), bh=Number($("boardH").value), kerf=Number($("kerfInput").value)||0;
+    const box=$("patPreview");
+    if(!(bw>0&&bh>0)){ box.innerHTML=""; return; }
+    const ready=patStrips.some(s=>s.rest||Number(s.size)>0);
+    if(!ready){ box.innerHTML=`<div class="pat-msg">띠 폭을 넣으면 미리보기가 그려져요.</div>`; return; }
+    const plan=buildPatternPlan(readPatDef(),bw,bh,kerf);
+    if(plan.error){ box.innerHTML=`<div class="pat-msg err">${escapeText(plan.error)}</div>`; return; }
+    const B=Math.max(1,Math.floor(Number($("patBoards").value)||1));
+    const W=300, H=Math.round(W*bw/bh), sx=W/bh, sy=H/bw;
+    const rects=plan.pieces.map(p=>`<rect x="${p.x*sx}" y="${p.y*sy}" width="${Math.max(1,p.w*sx)}" height="${Math.max(1,p.h*sy)}" class="pp"/>`).join("")
+      + plan.leftovers.map(f=>`<rect x="${f.x*sx}" y="${f.y*sy}" width="${Math.max(1,f.w*sx)}" height="${Math.max(1,f.h*sy)}" class="pl"/>`).join("");
+    const per=plan.pieces.length;
+    box.innerHTML=`<svg viewBox="-1 -1 ${W+2} ${H+2}" class="pat-svg" role="img" aria-label="패턴 미리보기"><rect x="0" y="0" width="${W}" height="${H}" class="pb"/>${rects}</svg>
+      <div class="pat-msg">원장 1장 → <b>${per.toLocaleString()}조각</b> · ${B.toLocaleString()}장이면 <b>${(per*B).toLocaleString()}조각</b><span class="cell-sub">${escapeText(patSummary(plan))}</span></div>`;
+  }
+
+  function addPatternPart(){
+    const boardW=Number($("boardW").value), boardH=Number($("boardH").value), boardT=Number($("boardT").value);
+    const kerf=Number($("kerfInput").value);
+    const B=Number($("patBoards").value);
+    if(!(boardW>0 && boardH>0 && boardT>0 && kerf>=0)){ toast("판재 정보와 톱날 두께를 올바르게 입력해 주세요."); return; }
+    if(!(Number.isInteger(B)&&B>=1)){ toast("장수를 1장 이상으로 입력해 주세요."); return; }
+    const def=readPatDef();
+    const plan=buildPatternPlan(def,boardW,boardH,kerf);
+    if(plan.error){ toast(plan.error); return; }
+    const per=plan.pieces.length;
+    parts.push({
+      pat:true, patDef:def, patBoards:B, patPer:per, patText:patSummary(plan),
+      w:0, h:0,
+      qty:calcMode==="reverse" ? B : per*B,
+      rotate:false,
+      boardW, boardH, boardT, kerf,
+      edgeTrim:getEdgeTrimMM(),
+      mode:calcMode
+    });
+    patStrips=[{size:"",rest:false,rep:1,split:"none",list:"",n:2}];
+    $("patBoards").value="1";
+    renderPatStrips();
+    renderParts();
+    resetResult();
+    toast("도면대로 부품을 추가했습니다.");
+  }
+
+  function partTitle(p){
+    if(p.pat) return `도면대로 (${p.patText})`;
+    if(p.div) return `${divLabel(p)} (약 ${p.w.toLocaleString()}×${p.h.toLocaleString()}mm)`;
+    return `${p.w.toLocaleString()}×${p.h.toLocaleString()}mm`;
   }
 
   function getExactSplitPlan(part,boardW,boardH,kerf){
@@ -2218,6 +2467,10 @@
     const mixedParts=[];
 
     items.forEach((part,partIndex)=>{
+      if(part.pat){
+        allSheets=allSheets.concat(planPatternSheets(boardW,boardH,part,partIndex,kerf));
+        return;
+      }
       if(part.div){
         allSheets=allSheets.concat(planDivisionSheets(boardW,boardH,part,partIndex,kerf));
         return;
@@ -2373,6 +2626,11 @@
   function calculateReverse(){
     const itemResults=parts.map((part,partIndex)=>{
       const boardCount=Math.floor(part.qty);
+      if(part.pat){
+        const sampleSheet=planPatternSheets(part.boardW,part.boardH,part,partIndex,part.kerf,1)[0];
+        const capacity=sampleSheet.placed.length;
+        return {part,partIndex,boardCount,capacity,totalProduction:capacity*boardCount,sampleSheet};
+      }
       if(part.div){
         const capacity=part.divW*part.divL;
         const sampleSheet=planDivisionSheets(part.boardW,part.boardH,{...part,qty:capacity},partIndex,part.kerf)[0];
@@ -2646,7 +2904,7 @@
       <div class="part-status">
         <div class="part-code">${codeFor(i)}</div>
         <div>
-          ${item.part.div ? `${divLabel(item.part)} (약 ${item.part.w.toLocaleString()}×${item.part.h.toLocaleString()}mm)` : `${item.part.w.toLocaleString()}×${item.part.h.toLocaleString()}mm`} ·
+          ${escapeText(partTitle(item.part))} ·
           두께 ${item.part.boardT.toLocaleString()}mm
         </div>
         <div class="qty">
@@ -2670,7 +2928,7 @@
             <span>
               패턴 ${index+1} · 두께 ${part.boardT.toLocaleString()}mm ·
               원장 1장당 ${item.capacity.toLocaleString()}개 ·
-              <b>재단 사이즈: ${part.w.toLocaleString()}×${part.h.toLocaleString()}mm</b>
+              <b>재단 사이즈: ${part.pat ? escapeText(part.patText) : `${part.w.toLocaleString()}×${part.h.toLocaleString()}mm`}</b>
             </span>
           </div>
           <div class="pattern-head-right">
@@ -2868,6 +3126,11 @@
     (sheet.placed||[]).forEach(p=>{
       const item=profile.items[p.partIndex];
       if(!item) return;
+      if(item.pat){
+        const label=patSizeLabel(p);
+        counts.set(label,(counts.get(label)||0)+1);
+        return;
+      }
 
       // 회전되어 놓였더라도 발주/재단 규격은 원래 입력 치수로 표시
       const label=item.div
@@ -2906,8 +3169,8 @@
     $("statusList").innerHTML=parts.map((p,i)=>`
       <div class="part-status">
         <div class="part-code">${codeFor(i)}</div>
-        <div>${p.div ? `${divLabel(p)} (약 ${p.w.toLocaleString()}×${p.h.toLocaleString()}mm)` : `${p.w.toLocaleString()}×${p.h.toLocaleString()}mm`} · 두께 ${p.boardT.toLocaleString()}mm</div>
-        <div class="qty">${p.div ? `원장 ${divBoardsOf(p).toLocaleString()}장<br>` : ""}${p.qty.toLocaleString()}개</div>
+        <div>${escapeText(partTitle(p))} · 두께 ${p.boardT.toLocaleString()}mm</div>
+        <div class="qty">${p.div ? `원장 ${divBoardsOf(p).toLocaleString()}장<br>` : ""}${p.pat ? `원장 ${p.patBoards.toLocaleString()}장<br>` : ""}${p.qty.toLocaleString()}개</div>
       </div>`).join("");
 
     let thicknessBox=$("thicknessBreakdown");
@@ -3191,6 +3454,15 @@
 
   $("addPartBtn").addEventListener("click",addPart);
   $("addDivBtn").addEventListener("click",addDivisionPart);
+  $("addPatBtn").addEventListener("click",addPatternPart);
+  $("patAddStrip").addEventListener("click",()=>{ patStrips.push({size:"",rest:false,rep:1,split:"none",list:"",n:2}); renderPatStrips(); const ins=$("patStrips").querySelectorAll(".pat-size"); ins[ins.length-1]?.focus(); });
+  $("patBoards").addEventListener("input",updatePatPreview);
+  document.querySelectorAll(".pat-dir-btn").forEach(b=>b.addEventListener("click",()=>{
+    patDir=b.dataset.dir;
+    document.querySelectorAll(".pat-dir-btn").forEach(x=>x.classList.toggle("active",x===b));
+    updatePatPreview();
+  }));
+  ["boardW","boardH","kerfInput"].forEach(id=>$(id).addEventListener("input",()=>{ if(inputKind==="pat") updatePatPreview(); }));
   document.querySelectorAll(".kind-btn").forEach(b=>b.addEventListener("click",()=>setInputKind(b.dataset.kind)));
   ["divW","divL","divBoards","boardW","boardH","kerfInput"].forEach(id=>$(id).addEventListener("input",updateDivPreview));
   ["divW","divL","divBoards"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")addDivisionPart()}));
@@ -3418,8 +3690,8 @@
       bd.hidden=false; sheet.hidden=false;
       document.body.classList.add("sheet-open");
       fit();
-      const first=$(inputKind==="div"?"divW":"partW");
-      try{ first.focus({preventScroll:true}); }catch(e){ first.focus(); }
+      const first=inputKind==="pat" ? null : $(inputKind==="div"?"divW":"partW");
+      if(first){ try{ first.focus({preventScroll:true}); }catch(e){ first.focus(); } }
     }
     function closeSheet(instant){
       if(!open) return;
@@ -3435,8 +3707,8 @@
     new MutationObserver(()=>{
       if(open && parts.length>prevCount){
         const i=parts.length-1, p=parts[i];
-        const what=p.div ? divLabel(p) : `${p.w.toLocaleString()} × ${p.h.toLocaleString()}`;
-        const qty=p.div ? `${divBoardsOf(p).toLocaleString()}장` : `${p.qty.toLocaleString()}${calcMode==="reverse"?"장":"개"}`;
+        const what=p.pat ? `도면대로 ${p.patPer}조각` : p.div ? divLabel(p) : `${p.w.toLocaleString()} × ${p.h.toLocaleString()}`;
+        const qty=p.pat ? `${p.patBoards.toLocaleString()}장` : p.div ? `${divBoardsOf(p).toLocaleString()}장` : `${p.qty.toLocaleString()}${calcMode==="reverse"?"장":"개"}`;
         $("psLast").innerHTML=`<span class="code-chip c${i%4}">${codeFor(i)}</span><span>${escapeText(what)} <b>${qty}</b> 추가됨</span><span class="ps-total">목록 ${parts.length}개</span>`;
       }
       prevCount=parts.length;
@@ -5185,6 +5457,49 @@
 <style>
   /* ===== v85: 자동 저장 표시 ===== */
   #resultSaveBtn.saved-flash{color:#1E9E50!important;border-color:rgba(30,158,80,.35)!important}
+</style>
+
+<style>
+  /* ===== v86: 도면대로 ===== */
+  .pat-inputs[hidden]{display:none!important}
+  .pat-inputs{display:flex;flex-direction:column;gap:10px}
+  .pat-dir{display:flex;flex-direction:column;gap:6px}
+  .pat-dir-label{font-size:12.5px;font-weight:700;color:var(--ink-soft)}
+  .pat-dir-btns{display:flex;gap:6px;background:var(--field);border-radius:12px;padding:3px}
+  .pat-dir-btn{flex:1;border:0;background:none;border-radius:10px;padding:8px 6px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-soft);cursor:pointer}
+  .pat-dir-btn.active{background:#fff;color:var(--ink);box-shadow:0 2px 8px rgba(30,55,100,.12)}
+  .pat-strips{display:flex;flex-direction:column;gap:8px}
+  .pat-strip{background:rgba(255,255,255,.7);border:1px solid var(--hair);border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .pat-row{display:flex;align-items:center;gap:6px;min-width:0}
+  .pat-no{font-size:12.5px;font-weight:800;color:var(--blue);white-space:nowrap;min-width:34px}
+  .pat-strip .input{height:40px;padding:6px 10px;font-size:15px;min-width:0}
+  .pat-size{flex:1 1 auto;width:0}
+  .pat-size:disabled{opacity:.45}
+  .pat-rest{border:1px solid var(--hair);background:#fff;border-radius:10px;height:40px;padding:0 10px;font:inherit;font-size:13px;font-weight:700;color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+  .pat-rest.on{background:var(--blue);border-color:var(--blue);color:#fff}
+  .pat-x{font-size:13px;color:var(--ink-mute)}
+  .pat-rep{flex:0 0 52px;width:52px;text-align:center}
+  .pat-del{border:0;background:none;color:var(--ink-mute);font-size:15px;width:30px;height:40px;cursor:pointer}
+  .pat-del:disabled{opacity:.3;cursor:default}
+  .pat-row2 .pat-split{flex:0 0 132px;width:132px;padding:0 28px 0 10px!important;line-height:40px!important;font-size:14px!important;-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-soft) 50%),linear-gradient(135deg,var(--ink-soft) 50%,transparent 50%);background-position:calc(100% - 14px) 18px,calc(100% - 9px) 18px;background-size:5px 5px;background-repeat:no-repeat}
+  .pat-row2 .pat-list{flex:1 1 auto;width:0}
+  .pat-row2 .pat-list[hidden],.pat-div[hidden]{display:none}
+  .pat-div{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--ink-soft)}
+  .pat-div .input{width:64px;text-align:center}
+  .pat-add-strip{border:1px dashed rgba(10,92,240,.4);background:var(--blue-tint);color:var(--blue);border-radius:12px;padding:10px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+  .pat-bottom{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}
+  .pat-preview{display:flex;flex-direction:column;gap:6px}
+  .pat-svg{width:100%;height:auto;display:block}
+  .pat-svg .pb{fill:#fff;stroke:var(--edge);stroke-width:1.2}
+  .pat-svg .pp{fill:var(--piece);stroke:var(--blue);stroke-width:.8}
+  .pat-svg .pl{fill:var(--wood);stroke:rgba(42,53,80,.35);stroke-width:.6;stroke-dasharray:2 2}
+  .pat-msg{font-size:12.5px;color:var(--ink-soft);line-height:1.5}
+  .pat-msg b{color:var(--blue-deep)}
+  .pat-msg.err{color:var(--danger);font-weight:700}
+  .pat-hint{margin:0;font-size:12px;color:var(--ink-mute);line-height:1.5}
+  .pat-hint b{color:var(--ink-soft)}
+  .input-kind .kind-btn{white-space:nowrap}
+  .part-sheet .pat-inputs{gap:12px}
 </style>
 </body>
 </html>
