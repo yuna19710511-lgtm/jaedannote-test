@@ -853,6 +853,11 @@
           <button type="button" class="kind-btn" data-kind="pat">도면대로</button>
         </div>
         <div class="pat-inputs" id="patInputs" hidden>
+          <div class="pat-ai">
+            <button type="button" class="pat-ai-btn" id="patAiBtn"><span aria-hidden="true">📷</span> 도면 사진으로 채우기 <span class="pat-ai-tag">AI</span></button>
+            <input type="file" id="patAiFile" accept="image/*" hidden>
+            <div class="pat-ai-status" id="patAiStatus" hidden></div>
+          </div>
           <div class="pat-dir" role="radiogroup" aria-label="첫 재단 방향">
             <span class="pat-dir-label">먼저 자르는 방향</span>
             <div class="pat-dir-btns">
@@ -1896,12 +1901,79 @@
     return Array.from({length:n},make);
   }
 
-  function readPatDef(){ return {dir:patDir,strips:patStrips.map(s=>({...s}))}; }
+  function readPatDef(){ return {dir:patDir,strips:patStrips.map(({warn,...s})=>({...s}))}; }
+
+  // ===== v88: 도면 사진 → AI가 칸 채우기 =====
+  function patAiStatus(html,kind){
+    const el=$("patAiStatus");
+    if(!html){ el.hidden=true; el.innerHTML=""; return; }
+    el.hidden=false; el.className="pat-ai-status"+(kind?" "+kind:""); el.innerHTML=html;
+  }
+  function setPatDir(dir){
+    patDir=dir==="wid"?"wid":"len";
+    document.querySelectorAll(".pat-dir-btn").forEach(x=>x.classList.toggle("active",x.dataset.dir===patDir));
+  }
+  function applyAiDrawing(r){
+    const strips=(Array.isArray(r.strips)?r.strips:[]).map(t=>{
+      const rest=!!t.rest || t.size==null;
+      const split=["none","list","div"].includes(t.split)?t.split:"none";
+      return {
+        size:rest?"":String(Math.round(Number(t.size)*10)/10||""),
+        rest,
+        rep:Math.max(1,Math.floor(Number(t.repeat)||1)),
+        split,
+        list:split==="list"?String(t.list||""):"",
+        n:Math.max(2,Math.floor(Number(t.n)||2)),
+        warn:!!t.unclear
+      };
+    });
+    if(!strips.length) throw new Error("도면에서 띠를 찾지 못했어요. 더 밝고 반듯하게 다시 찍어 주세요.");
+    // 원장 크기가 도면에 적혀 있으면 비교
+    const notes=[];
+    const bw=Number($("boardW").value), bh=Number($("boardH").value);
+    const dw=Number(r.board&&r.board.short), dh=Number(r.board&&r.board.long);
+    if(dw>0&&dh>0&&(dw!==bw||dh!==bh)) notes.push(`도면에 원장 ${dw}×${dh}로 적혀 있어요. 위 원장 크기(${bw||"?"}×${bh||"?"})를 확인해 주세요.`);
+    setPatDir(r.strip_side==="short"?"wid":"len");
+    patStrips=strips;
+    renderPatStrips();
+    (Array.isArray(r.unclear_notes)?r.unclear_notes:[]).forEach(t=>t&&notes.push("읽기 어려움: "+t));
+    const missing=(Array.isArray(r.missing)?r.missing:[]).filter(Boolean);
+    const warnN=strips.filter(s=>s.warn).length;
+    let html=`<b>✓ 도면을 읽었어요.</b> 칸에 채운 내용이 도면과 같은지 꼭 확인한 뒤 <b>추가</b>를 눌러 주세요.`;
+    if(warnN) html+=`<br>⚠ 노란 칸 ${warnN}개는 AI가 확실히 못 읽은 부분이에요.`;
+    if(notes.length) html+=`<ul>${notes.map(t=>`<li>${escapeText(t)}</li>`).join("")}</ul>`;
+    if(missing.length) html+=`<div class="pat-ai-miss">도면에 없어서 확인이 필요해요: ${missing.map(escapeText).join(", ")}</div>`;
+    patAiStatus(html,warnN||notes.length?"warn":"ok");
+  }
+  let patAiBusy=false;
+  $("patAiBtn").addEventListener("click",()=>{
+    if(patAiBusy) return;
+    if(window.jnCanEdit && !window.jnCanEdit()){ window.jnLicNotice && window.jnLicNotice(); return; }
+    $("patAiFile").value=""; $("patAiFile").click();
+  });
+  $("patAiFile").addEventListener("change",async e=>{
+    const file=e.target.files&&e.target.files[0];
+    if(!file) return;
+    if(!window.jnAiReadDrawing){ toast("AI 기능을 불러오지 못했어요. 새로고침해 주세요."); return; }
+    patAiBusy=true; $("patAiBtn").disabled=true;
+    const t0=Date.now();
+    patAiStatus(`<span class="pat-ai-spin" aria-hidden="true"></span> AI가 도면을 읽고 있어요… <span id="patAiSec">0초</span>`);
+    const tick=setInterval(()=>{ const el=$("patAiSec"); if(el) el.textContent=Math.round((Date.now()-t0)/1000)+"초"; },1000);
+    try{
+      const r=await window.jnAiReadDrawing(file);
+      applyAiDrawing(r);
+    }catch(err){
+      console.error(err);
+      patAiStatus(`<b>도면을 읽지 못했어요.</b> ${escapeText(err&&err.userMsg||err&&err.message&&/[가-힣]/.test(err.message)&&err.message||"잠시 후 다시 해 보거나, 칸에 직접 입력해 주세요.")}`,"err");
+    }finally{
+      clearInterval(tick); patAiBusy=false; $("patAiBtn").disabled=false;
+    }
+  });
 
   function renderPatStrips(){
     const box=$("patStrips");
     box.innerHTML=patStrips.map((s,i)=>`
-      <div class="pat-strip" data-i="${i}">
+      <div class="pat-strip${s.warn?" pat-warn":""}" data-i="${i}">${s.warn?`<div class="pat-warn-msg">⚠ AI가 확실히 못 읽었어요. 도면과 비교해 확인해 주세요.</div>`:""}
         <div class="pat-row">
           <span class="pat-no">띠 ${i+1}</span>
           <input class="input pat-size" type="number" inputmode="decimal" min="1" placeholder="폭 mm" value="${s.rest?"":escapeText(String(s.size??""))}" ${s.rest?"disabled":""} aria-label="띠 ${i+1} 폭">
@@ -1922,6 +1994,8 @@
       </div>`).join("");
     box.querySelectorAll(".pat-strip").forEach(row=>{
       const i=Number(row.dataset.i), s=patStrips[i];
+      const unwarn=()=>{ if(s.warn){ s.warn=false; row.classList.remove("pat-warn"); row.querySelector(".pat-warn-msg")?.remove(); } };
+      row.querySelectorAll("input,select,button").forEach(el=>el.addEventListener(el.tagName==="SELECT"?"change":el.tagName==="BUTTON"?"click":"input",unwarn,true));
       row.querySelector(".pat-size").addEventListener("input",e=>{ s.size=e.target.value; updatePatPreview(); });
       row.querySelector(".pat-rep").addEventListener("input",e=>{ s.rep=e.target.value; updatePatPreview(); });
       row.querySelector(".pat-rest").addEventListener("click",()=>{ s.rest=!s.rest; renderPatStrips(); });
@@ -1971,6 +2045,7 @@
     });
     patStrips=[{size:"",rest:false,rep:1,split:"none",list:"",n:2}];
     $("patBoards").value="1";
+    patAiStatus("");
     renderPatStrips();
     renderParts();
     resetResult();
@@ -3964,6 +4039,79 @@
       messagingSenderId:"13061358675",
       appId:"1:13061358675:web:7741b8431692918e4372a6"
     };
+    // ===== v88 AI (Firebase AI Logic · Gemini) =====
+    const AI_SDK_V="12.19.0", AI_MODEL="gemini-3.8-flash", RECAPTCHA_KEY="6Le8UfstAAAAADafFB95IM_QZzOkF4nKw4ekONNG";
+    let aiModelP=null;
+    function getAiModel(){
+      if(aiModelP) return aiModelP;
+      aiModelP=(async()=>{
+        const b=`https://www.gstatic.com/firebasejs/${AI_SDK_V}/`;
+        const [fa,fc,fai]=await Promise.all([import(b+"firebase-app.js"),import(b+"firebase-app-check.js"),import(b+"firebase-ai.js")]);
+        const app=fa.getApps().find(a=>a.name==="jn-ai")||fa.initializeApp(FB_CFG,"jn-ai");
+        fc.initializeAppCheck(app,{provider:new fc.ReCaptchaEnterpriseProvider(RECAPTCHA_KEY),isTokenAutoRefreshEnabled:true});
+        const ai=fai.getAI(app,{backend:new fai.GoogleAIBackend()});
+        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json"}});
+      })().catch(e=>{ aiModelP=null; throw e; });
+      return aiModelP;
+    }
+    // 폰 사진(수 MB)을 1600px JPEG로 줄여서 보냄
+    function shrinkImage(file,max=1600){
+      return new Promise((res,rej)=>{
+        const url=URL.createObjectURL(file), img=new Image();
+        img.onload=()=>{
+          const k=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+          const c=document.createElement("canvas");
+          c.width=Math.round(img.naturalWidth*k); c.height=Math.round(img.naturalHeight*k);
+          const g=c.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height);
+          URL.revokeObjectURL(url);
+          res(c.toDataURL("image/jpeg",0.85).split(",")[1]);
+        };
+        img.onerror=()=>{ URL.revokeObjectURL(url); const e=new Error("img"); e.userMsg="사진을 열 수 없어요. 다른 사진으로 해 보세요."; rej(e); };
+        img.src=url;
+      });
+    }
+    const AI_DRAWING_PROMPT=`이 사진은 목재 원장 재단 도면이야 (손그림 또는 표). 원장은 보통 1220×2440mm야.
+도면에 적힌 치수만 읽어서 아래 JSON 하나로만 답해. 설명 글은 쓰지 마.
+
+{
+  "strip_side": "long" 또는 "short",
+  "strips": [
+    {"size": 숫자 또는 null, "rest": true/false, "repeat": 정수, "split": "none"|"list"|"div", "list": "문자열", "n": 정수, "unclear": true/false}
+  ],
+  "board": {"short": 숫자 또는 null, "long": 숫자 또는 null},
+  "unclear_notes": ["문자열"],
+  "missing": ["문자열"]
+}
+
+규칙:
+- 원장을 먼저 띠로 자르는 방향을 봐. 띠 폭 치수들이 원장의 긴 변(2440 쪽)을 따라 나열돼 있으면 "long", 짧은 변(1220 쪽)을 따라 나열돼 있으면 "short".
+- strips는 왼쪽(또는 위쪽)부터 순서대로. 같은 폭·같은 나누기가 연달아 나오면 하나로 묶고 repeat에 개수를 써.
+- 치수가 안 적힌 마지막 남는 띠는 size: null, rest: true.
+- 띠 안을 다시 자르는 선이 있으면 split. 치수가 적혀 있으면 "list"로 하고 list에 "1090, 나머지"처럼 쉼표로 써 (치수 없는 남는 부분은 "나머지"). 같은 크기로 N개면 "div"로 하고 n에 개수. 안 자르면 "none".
+- 숫자가 흐리거나 확실하지 않으면 가장 그럴듯한 값을 넣고 그 띠에 "unclear": true, unclear_notes에 어디인지 짧게 써.
+- 원장 크기가 도면에 적혀 있으면 board에 넣고, 없으면 null.
+- missing에는 도면에 없는 정보를 짧게 (예: "원장 크기", "두께", "장수", "톱날 두께").
+- 지어내지 마. 도면에 있는 숫자만 써.`;
+    window.jnAiReadDrawing=async function(file){
+      if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.userMsg="AI 기능은 재단노트 인터넷 주소에서만 돼요. 내려받은 파일로는 안 돼요."; throw e; }
+      if(!user){ const e=new Error("login"); e.userMsg="로그인한 뒤에 써 주세요."; throw e; }
+      const [model,data]=await Promise.all([getAiModel(),shrinkImage(file)]);
+      let txt;
+      try{
+        const r=await model.generateContent([AI_DRAWING_PROMPT,{inlineData:{data,mimeType:"image/jpeg"}}]);
+        txt=r.response.text();
+      }catch(err){
+        const m=String(err&&(err.message||err.code)||"");
+        const e=new Error(m);
+        if(/app.?check|appCheck|attestation|recaptcha/i.test(m)) e.userMsg="보안 확인(App Check)에 실패했어요. 잠시 후 다시 해 주세요.";
+        else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
+        else if(/network|fetch|offline/i.test(m)) e.userMsg="인터넷 연결을 확인해 주세요.";
+        throw e;
+      }
+      const j=txt.slice(txt.indexOf("{"),txt.lastIndexOf("}")+1);
+      try{ return JSON.parse(j); }catch(_){ const e=new Error("json"); e.userMsg="AI 답을 이해하지 못했어요. 다시 한 번 해 주세요."; throw e; }
+    };
+
     const JOBS_KEY="jn_jobs_v1", CUR_KEY="jn_current_v1";
     let auth=null, db=null, user=null, fbReady=null, unsubJobs=null, cloudJobs=[], justLoggedIn=false, gating=false, authStep="login";
     const UID_KEY="jn_auth_uid";
@@ -5655,6 +5803,21 @@
   .pat-hint b{color:var(--ink-soft)}
   .input-kind .kind-btn{white-space:nowrap}
   .part-sheet .pat-inputs{gap:12px}
+  /* ===== v88: 도면 사진으로 채우기 ===== */
+  .pat-ai{display:flex;flex-direction:column;gap:8px}
+  .pat-ai-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;border:0;border-radius:14px;background:linear-gradient(135deg,#1F5FD6,#6A4BE0);color:#fff;font:inherit;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(31,95,214,.28)}
+  .pat-ai-btn:disabled{opacity:.6;cursor:default}
+  .pat-ai-tag{font-size:11px;font-weight:800;background:rgba(255,255,255,.22);border-radius:6px;padding:2px 6px}
+  .pat-ai-status{font-size:13px;line-height:1.55;color:var(--ink-soft);background:var(--blue-tint);border-radius:12px;padding:10px 12px}
+  .pat-ai-status.ok{background:#EAF7EF;color:#1D5B36}
+  .pat-ai-status.warn{background:#FFF6DD;color:#6B4E00}
+  .pat-ai-status.err{background:#FDECEC;color:var(--danger)}
+  .pat-ai-status ul{margin:6px 0 0;padding-left:18px}
+  .pat-ai-miss{margin-top:6px;font-weight:700}
+  .pat-ai-spin{display:inline-block;width:14px;height:14px;border:2px solid rgba(31,95,214,.25);border-top-color:var(--blue);border-radius:50%;vertical-align:-2px;margin-right:4px;animation:patspin .8s linear infinite}
+  @keyframes patspin{to{transform:rotate(360deg)}}
+  .pat-strip.pat-warn{background:#FFF6DD;border-color:#F2C94C}
+  .pat-warn-msg{font-size:12px;font-weight:700;color:#6B4E00}
 </style>
 
 <style>
