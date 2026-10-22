@@ -802,6 +802,7 @@
 
   <main class="workspace">
     <aside class="left-panel">
+      <div class="lic-banner" id="licBanner" hidden>이용 기간이 끝났어요 · 저장된 작업 보기와 PDF·이미지 받기는 계속 돼요</div>
       <section class="step step-mode" aria-label="계산 방식">
         <div class="step-head"><span class="step-no">1</span><h2>계산 방식</h2></div>
         <div class="segmented">
@@ -1044,6 +1045,27 @@
       </div>
       <p class="ios-foot" id="jobsEmpty">아직 저장된 작업이 없어요.</p>
       <p class="ios-foot last"></p>
+    </div>
+  </div>
+</div>
+
+<div class="lic-backdrop" id="licBackdrop" hidden>
+  <div class="lic-card" role="dialog" aria-modal="true" aria-labelledby="licTitle">
+    <div class="lic-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></svg></div>
+    <h2 id="licTitle">이용권이 필요해요</h2>
+    <p class="lic-msg" id="licMsg"></p>
+    <div class="lic-email" id="licEmailBox">
+      <span class="lic-email-label">내 가입 이메일</span>
+      <div class="lic-email-row"><b id="licEmail"></b><button type="button" id="licCopy">복사</button></div>
+    </div>
+    <ol class="lic-steps" id="licSteps">
+      <li>크몽 <b>일잘툴</b>에서 재단노트 이용권을 구매해요.</li>
+      <li>크몽 메시지로 위 <b>가입 이메일</b>을 보내 주세요.</li>
+      <li>확인되면 바로 열려요. 이 화면은 저절로 닫혀요.</li>
+    </ol>
+    <div class="lic-btns">
+      <button type="button" class="btn btn-primary" id="licOk">확인</button>
+      <button type="button" class="lic-sub" id="licLogout">다른 계정으로 로그인</button>
     </div>
   </div>
 </div>
@@ -3023,6 +3045,7 @@
   }
 
   function calculate(){
+    if(window.jnCanEdit && !window.jnCanEdit() && !(window.jnRestoring && window.jnRestoring())){ window.jnLicNotice(); return; }
     if(!parts.length){
       toast("먼저 부품을 추가해 주세요.");
       return;
@@ -3994,8 +4017,13 @@
 
     async function onUser(u){
       user=u||null;
+      const fresh=justLoggedIn;
       if(unsubJobs){ unsubJobs(); unsubJobs=null; }
       cloudJobs=[];
+      lic={state:"unknown"};
+      watchLicense();
+      if(user) claimDevice(fresh);
+      else if(unsubSess){ unsubSess(); unsubSess=null; }
       updateAuthUI(); renderIfOpen();
       if(!user){
         // 이 기기에 로그인 기록이 있었는데 계정이 풀린 경우: 다시 로그인 받기
@@ -4061,6 +4089,132 @@
       $("authBackdrop").classList.remove("gate","solid");
       closeAuth();
       window.jnIntroClose && window.jnIntroClose();
+      renderLic();
+    }
+
+    // ===== v87 이용권 · 기기 제한 =====
+    // licenses/{가입 이메일} 문서: plan(문자), expires(타임스탬프 또는 "2026-12-31")
+    // sessions/{uid} 문서: phone / pc 칸에 지금 쓰는 기기 표시
+    let lic={state:"unknown"}, unsubLic=null, unsubSess=null, expiredShown=false, soonShown=false;
+    const PLAN_NAME={standard:"스탠다드",deluxe:"디럭스",premium:"프리미엄"};
+    const planName=p=>PLAN_NAME[String(p||"").toLowerCase()]||String(p||"이용권");
+    const DEV_KEY="jn_device_id";
+    function deviceId(){ try{ let d=localStorage.getItem(DEV_KEY); if(!d){ d=Date.now().toString(36)+Math.random().toString(36).slice(2,10); localStorage.setItem(DEV_KEY,d); } return d; }catch(e){ return "nostore"; } }
+    const deviceSlot=()=>isTouchDevice()?"phone":"pc";
+    function toDate(v){
+      if(!v) return null;
+      if(typeof v.toDate==="function") return v.toDate();
+      if(typeof v==="string"){ const m=v.trim().match(/^(\d{4})[-.\/](\d{1,2})[-.\/](\d{1,2})/); if(m) return new Date(+m[1],+m[2]-1,+m[3],23,59,59); }
+      if(typeof v==="number") return new Date(v);
+      return null;
+    }
+    const fmtYmd=d=>`${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,"0")}.${String(d.getDate()).padStart(2,"0")}`;
+    const licKey=()=>((user&&user.email)||"").trim().toLowerCase();
+    function licText(){
+      if(lic.state==="active") return `${planName(lic.plan)} · ${fmtYmd(lic.expires)}까지`;
+      if(lic.state==="expired") return `${planName(lic.plan)} · ${fmtYmd(lic.expires)} 만료`;
+      if(lic.state==="none") return "이용권 없음";
+      if(lic.state==="error") return "확인하지 못함";
+      return "확인 중…";
+    }
+    function watchLicense(){
+      if(unsubLic){ unsubLic(); unsubLic=null; }
+      if(!user||!db){ lic={state:"unknown"}; renderLic(); return; }
+      const key=licKey();
+      if(!key){ lic={state:"none"}; renderLic(); return; }
+      unsubLic=db.collection("licenses").doc(key).onSnapshot(s=>{
+        const x=s.exists?s.data():null, exp=x?toDate(x.expires):null;
+        if(!x||!exp) lic={state:"none"};
+        else lic={state:exp.getTime()>=Date.now()?"active":"expired",plan:x.plan||"standard",expires:exp};
+        renderLic();
+      },e=>{ console.error(e); lic={state:"error"}; renderLic(); });
+    }
+    function showLic(kind){
+      const email=licKey()||"(이메일 없음)";
+      $("licEmail").textContent=email;
+      if(kind==="expired"){
+        $("licTitle").textContent="이용 기간이 끝났어요";
+        $("licMsg").innerHTML=`${escapeText(planName(lic.plan))} 이용권이 <b>${fmtYmd(lic.expires)}</b>에 끝났어요.<br>저장된 작업 보기와 PDF·이미지 받기는 계속 할 수 있어요. 새 계산과 작업 저장은 이용권을 연장하면 다시 쓸 수 있어요.`;
+        $("licSteps").innerHTML=`<li>크몽 <b>일잘툴</b>에서 이용권을 연장해요.</li><li>크몽 메시지로 위 <b>가입 이메일</b>을 보내 주세요.</li><li>확인되면 바로 다시 열려요.</li>`;
+        $("licOk").hidden=false;
+      }else if(kind==="error"){
+        $("licTitle").textContent="이용권을 확인하지 못했어요";
+        $("licMsg").textContent="인터넷 연결을 확인한 뒤 다시 확인을 눌러 주세요. 계속 안 되면 크몽 메시지로 가입 이메일과 함께 알려 주세요.";
+        $("licSteps").innerHTML="";
+        $("licOk").hidden=false; $("licOk").textContent="다시 확인";
+      }else{
+        $("licTitle").textContent="이용권이 필요해요";
+        $("licMsg").textContent="재단노트는 이용권이 있는 계정에서 쓸 수 있어요.";
+        $("licSteps").innerHTML=`<li>크몽 <b>일잘툴</b>에서 재단노트 이용권을 구매해요.</li><li>크몽 메시지로 위 <b>가입 이메일</b>을 보내 주세요.</li><li>확인되면 바로 열려요. 이 화면은 저절로 닫혀요.</li>`;
+        $("licOk").hidden=true;
+      }
+      if(kind!=="error") $("licOk").textContent="확인";
+      $("licBackdrop").dataset.kind=kind;
+      $("licBackdrop").hidden=false;
+    }
+    const hideLic=()=>{ $("licBackdrop").hidden=true; };
+    function renderLic(){
+      updateAuthUI(); renderIfOpen();
+      document.body.classList.toggle("lic-expired",lic.state==="expired");
+      const banner=$("licBanner");
+      if(banner) banner.hidden=lic.state!=="expired";
+      if(!user||gating||lic.state==="unknown"){ if(!user) hideLic(); return; }
+      if(lic.state==="active"){
+        hideLic();
+        const days=Math.ceil((lic.expires.getTime()-Date.now())/86400000);
+        if(days<=7 && !soonShown){ soonShown=true; toast(`이용 기간이 ${days}일 남았어요 (${fmtYmd(lic.expires)}까지).`); }
+        return;
+      }
+      if(lic.state==="expired"){ if(!expiredShown){ expiredShown=true; showLic("expired"); } return; }
+      showLic(lic.state);
+    }
+    // 계산·저장 가능 여부 (불러오는 중이거나 오프라인이면 막지 않음)
+    const canEdit=()=>!user || lic.state==="active" || lic.state==="unknown";
+    window.jnCanEdit=canEdit;
+    window.jnRestoring=()=>restoring;
+    window.jnLicNotice=()=>showLic(lic.state==="expired"?"expired":lic.state==="error"?"error":"none");
+    $("licOk").addEventListener("click",()=>{
+      if($("licBackdrop").dataset.kind==="error"){ watchLicense(); return; }
+      hideLic();
+    });
+    $("licLogout").addEventListener("click",()=>window.jnLogoutAndReset());
+    $("licCopy").addEventListener("click",async()=>{
+      const t=$("licEmail").textContent;
+      try{ await navigator.clipboard.writeText(t); toast("이메일을 복사했어요."); }
+      catch(e){ const r=document.createRange(); r.selectNodeContents($("licEmail")); const s=getSelection(); s.removeAllRanges(); s.addRange(r); toast("이메일을 길게 눌러 복사해 주세요."); }
+    });
+
+    // 한 계정에 폰 1대 + PC 1대: 새로 로그인한 기기가 그 칸을 차지하고, 예전 기기는 로그아웃
+    async function claimDevice(fresh){
+      if(unsubSess){ unsubSess(); unsubSess=null; }
+      if(!user||!db) return;
+      const slot=deviceSlot(), me=deviceId();
+      const ref=db.collection("sessions").doc(user.uid);
+      try{
+        const snap=await ref.get();
+        const cur=(snap.exists?snap.data():{})[slot];
+        if(!fresh && cur && cur.id && cur.id!==me){ kicked(slot); return; }
+        if(fresh || !cur || cur.id!==me){
+          await ref.set({[slot]:{id:me,at:Date.now(),ua:navigator.userAgent.slice(0,120)}},{merge:true});
+        }
+        unsubSess=ref.onSnapshot(s=>{
+          const c=(s.data()||{})[slot];
+          if(c && c.id && c.id!==me) kicked(slot);
+        },e=>console.error(e));
+      }catch(e){ console.error(e); }
+    }
+    let kicking=false;
+    async function kicked(slot){
+      if(kicking) return; kicking=true;
+      if(unsubSess){ unsubSess(); unsubSess=null; }
+      const where=slot==="phone"?"다른 폰":"다른 PC";
+      await ask("다른 기기에서 로그인했어요",`이 계정으로 ${where}에서 로그인해서, 여기서는 로그아웃됐어요. 한 계정은 폰 1대와 PC 1대에서 쓸 수 있어요. 계속 쓰려면 다시 로그인해 주세요.`,[{label:"확인",value:1,strong:true}]);
+      try{ if(auth) await auth.signOut(); }catch(e){}
+      try{
+        [UID_KEY,"woodcutter_settings_v2",CUR_KEY,JOBS_KEY,"jn_data_uid"].forEach(k=>localStorage.removeItem(k));
+        sessionStorage.removeItem(UID_KEY);
+      }catch(e){}
+      location.reload();
     }
     function gate(){
       gating=true;
@@ -4178,7 +4332,7 @@
       $("authBtn").hidden=true;
       $("coMenuAuth").textContent="로그아웃";
       $("setAccount").innerHTML=user
-        ? `<div class="ios-row"><span class="ios-label">로그인</span><span class="acct-email">${escapeText(email)}</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`
+        ? `<div class="ios-row"><span class="ios-label">로그인</span><span class="acct-email">${escapeText(email)}</span></div><div class="ios-row"><span class="ios-label">이용권</span><span class="acct-email lic-state ${lic.state}">${escapeText(licText())}</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`
         : `<div class="ios-row"><span class="ios-label">계정</span><span class="acct-email">연결 중…</span></div><button class="ios-row ios-action danger" type="button" data-auth="logout">로그아웃</button>`;
       $("setAccountFoot").textContent=user
         ? "작업 목록과 업체 설정이 계정에 저장돼서 폰·PC 어디서나 같아요."
@@ -4247,7 +4401,7 @@
     function render(){
       const list=allJobs().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
       $("jobsAccount").innerHTML=user
-        ? `<div class="jobs-acct on"><span>${escapeText(user.email||"계정")}</span><b>계정에 저장 중</b></div>`
+        ? `<div class="jobs-acct on"><span>${escapeText(user.email||"계정")}<small class="lic-line ${lic.state}">${escapeText(licText())}</small></span><b>${lic.state==="expired"?"보기만 가능":"계정에 저장 중"}</b></div>`
         : `<div class="jobs-acct"><span>계정에 연결되지 않았어요. 지금은 이 기기에 저장돼요.</span></div>`;
       $("jobsCount").textContent=list.length?`(${list.length})`:"";
       $("jobsEmpty").hidden=!!list.length;
@@ -4272,6 +4426,7 @@
     function closeJobs(){ const bd=$("jobsBackdrop"); if(bd.hidden) return; bd.classList.add("closing"); setTimeout(()=>{ bd.hidden=true; bd.classList.remove("closing"); },220); }
 
     async function saveJob(asNew,opt={}){
+      if(!canEdit()){ if(!opt.quiet) window.jnLicNotice(); return false; }
       if(!parts.length && !$("siteName").value.trim()){ if(!opt.quiet) toast("저장할 내용이 없어요. 부품을 먼저 넣어 주세요."); return false; }
       const name=opt.name||($("jobName").value||"").trim()||defaultName();
       const data=projectData(); delete data.settings;
@@ -5500,6 +5655,37 @@
   .pat-hint b{color:var(--ink-soft)}
   .input-kind .kind-btn{white-space:nowrap}
   .part-sheet .pat-inputs{gap:12px}
+</style>
+
+<style>
+  /* ===== v87: 이용권 · 기기 제한 ===== */
+  .lic-backdrop[hidden]{display:none!important}
+  .lic-backdrop{position:fixed;inset:0;z-index:3000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(15,27,45,.42);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);animation:bdIn .22s ease both}
+  .lic-card{width:100%;max-width:400px;max-height:calc(100vh - 40px);overflow:auto;background:var(--glass-strong,#fff);border:1px solid var(--glass-line,#fff);border-radius:24px;box-shadow:0 24px 60px rgba(15,27,45,.25);padding:28px 22px 20px;text-align:center}
+  .lic-icon{width:52px;height:52px;border-radius:16px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;background:var(--blue-tint);color:var(--blue)}
+  .lic-card h2{margin:0 0 8px;font-size:20px;font-weight:800;color:var(--ink)}
+  .lic-msg{margin:0 0 16px;font-size:14px;line-height:1.6;color:var(--ink-soft)}
+  .lic-msg b{color:var(--ink)}
+  .lic-email{background:var(--field);border-radius:14px;padding:10px 12px;text-align:left;margin-bottom:14px}
+  .lic-email-label{display:block;font-size:12px;font-weight:700;color:var(--ink-mute);margin-bottom:4px}
+  .lic-email-row{display:flex;align-items:center;gap:8px}
+  .lic-email-row b{flex:1;min-width:0;font-size:15px;color:var(--ink);word-break:break-all;user-select:all;-webkit-user-select:all}
+  .lic-email-row button{flex:none;border:0;background:#fff;color:var(--blue);font:inherit;font-size:13px;font-weight:700;border-radius:10px;padding:7px 12px;cursor:pointer;box-shadow:0 1px 4px rgba(30,55,100,.12)}
+  .lic-steps{margin:0 0 18px;padding:0 0 0 20px;text-align:left;font-size:13.5px;line-height:1.7;color:var(--ink-soft)}
+  .lic-steps:empty{display:none}
+  .lic-steps b{color:var(--ink)}
+  .lic-btns{display:flex;flex-direction:column;gap:6px}
+  .lic-btns .btn{height:48px;border-radius:14px;font-size:16px}
+  .lic-btns .btn[hidden]{display:none}
+  .lic-sub{border:0;background:none;color:var(--ink-soft);font:inherit;font-size:14px;font-weight:600;padding:10px;cursor:pointer}
+  .lic-banner[hidden]{display:none}
+  .lic-banner{margin:0 0 12px;padding:10px 14px;border-radius:14px;background:#FFF4E5;color:#8A4B00;font-size:13px;font-weight:700;line-height:1.5;border:1px solid #FFE0B2}
+  .lic-state.active{color:var(--blue)!important}
+  .lic-state.expired,.lic-state.none,.lic-state.error{color:var(--danger)!important}
+  .lic-line{display:block;font-size:12px;font-weight:600;margin-top:2px;color:var(--ink-mute)}
+  .lic-line.active{color:var(--blue)}
+  .lic-line.expired,.lic-line.none{color:var(--danger)}
+  body.lic-expired #calculateBtn{opacity:.55}
 </style>
 </body>
 </html>
