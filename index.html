@@ -4143,7 +4143,7 @@
       appId:"1:13061358675:web:7741b8431692918e4372a6"
     };
     // ===== v88 AI (Firebase AI Logic · Gemini) =====
-    const AI_SDK_V="12.19.0", AI_MODEL="gemini-3.8-flash", RECAPTCHA_KEY="6Le8UfstAAAAADafFB95IM_QZzOkF4nKw4ekONNG";
+    const AI_SDK_V="12.19.0", AI_MODEL="gemini-3.5-flash-lite", RECAPTCHA_KEY="6Le8UfstAAAAADafFB95IM_QZzOkF4nKw4ekONNG";
     let aiModelP=null, aiAppCheck=null, aiFc=null;
     const withTimeout=(p,ms,msg,code)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>{ const e=new Error(code); e.code=code; e.userMsg=msg; rej(e); },ms))]);
     function getAiModel(){
@@ -4171,7 +4171,7 @@
           },
           optionalProperties:["parts","strip_side","strips","material","thickness","board","pattern_boards","notes","questions"]
         });
-        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:6144,thinkingConfig:{thinkingLevel:"LOW"}}});
+        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:6144,thinkingConfig:{thinkingLevel:"MINIMAL"}}});
       })().catch(e=>{ aiModelP=null; throw e; });
       return aiModelP;
     }
@@ -4246,7 +4246,8 @@
           return {txt,fr};
         }catch(err){
           console.warn(`[AI] 시도 ${no} 실패 (${why||"error"}) · 받은 글자 ${txt.length}`, txt.slice(0,1500), err);
-          if(why==="first"&&no===1) return attempt(2);
+          // 한도 오류(429)·연결 오류는 다시 보내지 않음 (하루 한도를 아끼기 위해). 응답이 아예 없을 때만 한 번 더.
+          if(why==="first"&&no===1&&!/429|quota|exhausted|rate/i.test(String(err&&err.message))) return attempt(2);
           const e=new Error(String(err&&err.message||why));
           if(why==="first"||why==="total"){ e.code="read-timeout"; e.userMsg=got?"AI 답이 너무 길어져서 멈췄어요. 다시 해 주세요.":"AI가 응답하지 않아 멈췄어요. 다시 해 주세요."; throw e; }
           const m=String(err&&(err.message||err.code)||""); e.code="read-fail";
