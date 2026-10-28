@@ -2039,17 +2039,26 @@
     if(!file) return;
     if(!window.jnAiReadDrawing){ toast("AI 기능을 불러오지 못했어요. 새로고침해 주세요."); return; }
     patAiBusy=true; $("patAiBtn").disabled=true;
-    const t0=Date.now(); let stage="prep", stT=t0; const done=[];
+    const t0=Date.now(); let stage="prep", stT=t0; const done=[]; let live="";
     const draw=()=>{
       const sec=Math.round((Date.now()-t0)/1000);
       patAiStatus(`<span class="pat-ai-spin" aria-hidden="true"></span> <b>${AI_STAGE_NAMES[stage]||"AI"}…</b> ${sec}초
-        <div class="ai-steps">${["prep","check","shrink","read"].map(k=>`<span class="${done.some(d=>d.k===k)?"on":k===stage?"now":""}">${AI_STAGE_NAMES[k]}</span>`).join("")}</div>`);
+        <div class="ai-steps">${["prep","check","shrink","read"].map(k=>`<span class="${done.some(d=>d.k===k)?"on":k===stage?"now":""}">${AI_STAGE_NAMES[k]}</span>`).join("")}</div>${live}`);
     };
     draw();
     const tick=setInterval(draw,1000);
     const onStage=k=>{ const now=Date.now(); done.push({k:stage,ms:now-stT}); stage=k; stT=now; draw(); };
     try{
-      const r=await window.jnAiReadDrawing(file,onStage);
+      const onPartial=txt=>{
+        const found=[];
+        (txt.match(/\{[^{}]*"a"\s*:\s*[\d.]+[^{}]*\}/g)||[]).forEach(m=>{ try{ const p=JSON.parse(m); if(p.b) found.push(p); }catch(_){} });
+        const strips=(txt.match(/"repeat"\s*:/g)||[]).length;
+        if(found.length) live=`<div class="ai-live"><b>부품 ${found.length}개 읽음</b>${found.slice(-4).map(p=>`<span>${escapeText(String(p.a))} × ${escapeText(String(p.b))} × ${escapeText(String(p.qty??1))}</span>`).join("")}</div>`;
+        else if(strips) live=`<div class="ai-live"><b>띠 ${strips}개 읽음</b></div>`;
+        else live=`<div class="ai-live"><b>답을 받는 중…</b></div>`;
+        draw();
+      };
+      const r=await window.jnAiReadDrawing(file,onStage,onPartial);
       done.push({k:stage,ms:Date.now()-stT});
       const timing="걸린 시간 "+((Date.now()-t0)/1000).toFixed(1)+"초 ("+done.map(d=>`${AI_STAGE_NAMES[d.k]} ${(d.ms/1000).toFixed(1)}`).join(" · ")+")";
       applyAiDrawing(r,timing);
@@ -4146,7 +4155,23 @@
         aiFc=fc;
         aiAppCheck=fc.initializeAppCheck(app,{provider:new fc.ReCaptchaEnterpriseProvider(RECAPTCHA_KEY),isTokenAutoRefreshEnabled:true});
         const ai=fai.getAI(app,{backend:new fai.GoogleAIBackend()});
-        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",thinkingConfig:{thinkingLevel:"LOW"}}});
+        const S=fai.Schema, num=()=>S.number({nullable:true}), str=()=>S.string();
+        const responseSchema=S.object({
+          properties:{
+            kind:S.enumString({enum:["parts","pattern"]}),
+            parts:S.array({items:S.object({properties:{a:S.number(),b:S.number(),qty:S.integer(),note:str(),unclear:S.boolean()},optionalProperties:["note","unclear"]})}),
+            strip_side:S.enumString({enum:["long","short"]}),
+            strips:S.array({items:S.object({properties:{size:num(),rest:S.boolean(),repeat:S.integer(),split:S.enumString({enum:["none","list","div"]}),list:str(),n:S.integer(),unclear:S.boolean()},optionalProperties:["rest","list","n","unclear"]})}),
+            material:str(),
+            thickness:num(),
+            board:S.object({properties:{short:num(),long:num()}}),
+            pattern_boards:S.integer({nullable:true}),
+            notes:S.array({items:str()}),
+            questions:S.array({items:str()})
+          },
+          optionalProperties:["parts","strip_side","strips","material","thickness","board","pattern_boards","notes","questions"]
+        });
+        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:6144,thinkingConfig:{thinkingLevel:"LOW"}}});
       })().catch(e=>{ aiModelP=null; throw e; });
       return aiModelP;
     }
@@ -4190,7 +4215,7 @@
 - 두께(예: 18T → 18), 자재, 원장 크기, 장수가 적혀 있으면 넣고 없으면 null.
 - questions는 견적 전에 손님에게 꼭 물어야 할 것만 존댓말 한 문장씩 (예: "원장은 1220×2440 기준으로 보면 될까요?"). 도면에 이미 있는 건 묻지 마. 최대 5개.
 - 도면에 없는 숫자를 지어내지 마.`;
-    window.jnAiReadDrawing=async function(file,onStage){
+    window.jnAiReadDrawing=async function(file,onStage,onPartial){
       const stage=k=>{ try{ onStage&&onStage(k); }catch(_){} };
       if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.code="proto"; e.userMsg="AI 기능은 AI 재단노트 인터넷 주소에서만 돼요."; throw e; }
       if(!user){ const e=new Error("login"); e.code="login"; e.userMsg="로그인한 뒤에 써 주세요."; throw e; }
@@ -4201,20 +4226,40 @@
       stage("shrink");
       const data=await shrinkImage(file);
       stage("read");
-      let txt;
-      try{
-        const r=await withTimeout(model.generateContent([AI_DRAWING_PROMPT,{inlineData:{data,mimeType:"image/jpeg"}}]),60000,"AI 답이 60초 넘게 오지 않아 멈췄어요. 다시 해 주세요.","read-timeout");
-        txt=r.response.text();
-      }catch(err){
-        if(err.code==="read-timeout") throw err;
-        const m=String(err&&(err.message||err.code)||"");
-        const e=new Error(m); e.code="read-fail";
-        if(/app.?check|attestation|recaptcha|401|403/i.test(m)) e.userMsg="보안 확인에 실패했어요. 잠시 후 다시 해 주세요.";
-        else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
-        else if(/network|fetch|offline/i.test(m)) e.userMsg="인터넷 연결을 확인해 주세요.";
-        else e.userMsg="AI 연결에 문제가 생겼어요. 다시 해 주세요.";
-        throw e;
+      const req=[AI_DRAWING_PROMPT,{inlineData:{data,mimeType:"image/jpeg"}}];
+      const FIRST_MS=25000, TOTAL_MS=70000, tStart=Date.now();
+      async function attempt(no){
+        const ctrl=new AbortController(); let txt="", got=false, why="";
+        const firstT=setTimeout(()=>{ if(!got){ why="first"; ctrl.abort(); } },FIRST_MS);
+        const left=Math.max(5000,TOTAL_MS-(Date.now()-tStart));
+        const totalT=setTimeout(()=>{ why="total"; ctrl.abort(); },left);
+        try{
+          const res=await model.generateContentStream(req,{signal:ctrl.signal,timeout:left});
+          for await(const ch of res.stream){
+            let piece=""; try{ piece=ch.text(); }catch(_){}
+            if(piece){ if(!got) console.info(`[AI] 첫 글자 ${((Date.now()-tStart)/1000).toFixed(1)}초 (시도 ${no})`); got=true; txt+=piece; try{ onPartial&&onPartial(txt); }catch(_){} }
+          }
+          const fin=await res.response.catch(()=>null);
+          const um=fin&&fin.usageMetadata; if(um) console.info("[AI] 토큰",um);
+          const fr=fin&&fin.candidates&&fin.candidates[0]&&fin.candidates[0].finishReason;
+          if(fr&&fr!=="STOP") console.warn("[AI] 끝난 이유:",fr,"글자수",txt.length);
+          return {txt,fr};
+        }catch(err){
+          console.warn(`[AI] 시도 ${no} 실패 (${why||"error"}) · 받은 글자 ${txt.length}`, txt.slice(0,1500), err);
+          if(why==="first"&&no===1) return attempt(2);
+          const e=new Error(String(err&&err.message||why));
+          if(why==="first"||why==="total"){ e.code="read-timeout"; e.userMsg=got?"AI 답이 너무 길어져서 멈췄어요. 다시 해 주세요.":"AI가 응답하지 않아 멈췄어요. 다시 해 주세요."; throw e; }
+          const m=String(err&&(err.message||err.code)||""); e.code="read-fail";
+          if(/app.?check|attestation|recaptcha|401|403/i.test(m)) e.userMsg="보안 확인에 실패했어요. 잠시 후 다시 해 주세요.";
+          else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
+          else if(/network|fetch|offline/i.test(m)) e.userMsg="인터넷 연결을 확인해 주세요.";
+          else e.userMsg="AI 연결에 문제가 생겼어요. 다시 해 주세요.";
+          throw e;
+        }finally{ clearTimeout(firstT); clearTimeout(totalT); }
       }
+      const out=await attempt(1);
+      const txt=out.txt;
+      if(out.fr==="MAX_TOKENS"){ const e=new Error("max"); e.code="max-tokens"; e.userMsg="AI 답이 너무 길어져서 멈췄어요. 다시 해 주세요."; console.warn("[AI] 길이 상한 도달",txt.slice(0,1500)); throw e; }
       const j=txt.slice(txt.indexOf("{"),txt.lastIndexOf("}")+1);
       try{ return JSON.parse(j); }catch(_){ const e=new Error("json"); e.code="json"; e.userMsg="AI 답을 정리하지 못했어요. 다시 해 주세요."; throw e; }
     };
@@ -5956,6 +6001,9 @@
   .ai-steps span.on{background:#DDF1E4;color:#1D5B36}
   .ai-steps span.now{background:var(--blue);color:#fff}
   .ai-time{margin-top:8px;font-size:11.5px;opacity:.75}
+  .ai-live{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:8px;font-size:12.5px}
+  .ai-live b{flex-basis:100%;color:var(--blue-deep)}
+  .ai-live span{background:#fff;border-radius:7px;padding:2px 8px;font-weight:700}
   .ai-err-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
   .ai-err-actions .btn{height:38px;padding:0 16px}
   .ai-err-actions span{font-size:12.5px}
