@@ -1166,6 +1166,23 @@
   let lastResult = null;
   let calcMode = "target";
   function getEdgeTrimMM(){ return Number($("edgeTrimInput")?.value || 0); }
+  // v96: 부품이 원장보다 조금 짧으면(여유분보다 적게 남으면) 여유분은 남는 만큼만 다듬는다.
+  // pieces: 부품마다 놓을 수 있는 방향 목록 [{w(길이 방향),h(폭 방향)}]
+  function relaxTrims(boardW,boardH,pieces,tx,ty){
+    const eq=(a,b)=>Math.abs(a-b)<0.0001;
+    const fitsWith=(o,x,y)=>(eq(o.w,boardH)||o.w<=boardH-x+0.0001)&&(eq(o.h,boardW)||o.h<=boardW-y+0.0001);
+    pieces.forEach(opts=>{
+      if(opts.some(o=>fitsWith(o,tx,ty))) return;
+      let best=null;
+      opts.forEach(o=>{
+        if(o.w>boardH+0.0001||o.h>boardW+0.0001) return;
+        const nx=eq(o.w,boardH)?tx:Math.min(tx,boardH-o.w), ny=eq(o.h,boardW)?ty:Math.min(ty,boardW-o.h);
+        const sc=Math.min(nx,ny); if(!best||sc>best.s) best={nx,ny,s:sc};
+      });
+      if(best){ tx=best.nx; ty=best.ny; }
+    });
+    return {tx:Math.max(0,Math.round(tx*10)/10),ty:Math.max(0,Math.round(ty*10)/10)};
+  }
 
   // ===== 업체 설정 (v58) =====
   const SETTINGS_KEY="woodcutter_settings_v2";
@@ -1402,7 +1419,7 @@
           <td class="pr-del">${del}</td></tr>`;
       }
       return `<tr class="pr">
-        <td class="pr-main">${chip}<span class="pr-text"><b class="pr-dim">${p.w.toLocaleString()} × ${p.h.toLocaleString()}</b><span class="pr-sub">${p.boardT.toLocaleString()}T</span></span></td>
+        <td class="pr-main">${chip}<span class="pr-text"><b class="pr-dim">${p.w.toLocaleString()} × ${p.h.toLocaleString()}</b><span class="pr-sub">${p.boardT.toLocaleString()}T${(p.boardW!==1220||p.boardH!==2440)?` · 원장 ${p.boardW}×${p.boardH}`:""}${p.note?` · ${escapeText(p.note)}`:""}</span></span></td>
         <td class="pr-qty"><b>${p.qty.toLocaleString()}</b>${calcMode==="reverse"?"장":"개"}</td>
         <td class="pr-del">${del}</td></tr>`;
     }).join("");
@@ -1502,8 +1519,8 @@
       const lenDifference=part.boardH-option.drawW;
       const widDifference=part.boardW-option.drawH;
 
-      const trimX=Math.abs(lenDifference)<0.0001 ? 0 : getEdgeTrimMM();
-      const trimY=Math.abs(widDifference)<0.0001 ? 0 : getEdgeTrimMM();
+      const trimX=Math.abs(lenDifference)<0.0001 ? 0 : Math.min(getEdgeTrimMM(),Math.max(0,lenDifference));
+      const trimY=Math.abs(widDifference)<0.0001 ? 0 : Math.min(getEdgeTrimMM(),Math.max(0,widDifference));
 
       const usableLen=part.boardH-trimX;
       const usableWid=part.boardW-trimY;
@@ -1950,11 +1967,10 @@
     if(inputKind!=="pat") setInputKind("pat"); else renderPatStrips();
     return strips.filter(s=>s.warn).length;
   }
-  // 계산과 같은 규칙: 원장과 같은 변은 그대로, 더 짧으면 여유분(가장자리)만큼 빼고 비교
+  // 원장 안에 들어가는지 (원장보다 조금 짧으면 여유분을 줄여서 씀)
   function fitsBoard(a,b,bd){
-    const L=Math.max(a,b), S=Math.min(a,b), tr=Number(getEdgeTrimMM())||0;
-    const ok=(len,side)=>len===side || len<=side-tr;
-    return (ok(L,bd.h)&&ok(S,bd.w)) || (L<=bd.w&&ok(L,bd.w)&&ok(S,bd.h));
+    const L=Math.max(a,b), S=Math.min(a,b);   // 여유분은 계산할 때 남는 만큼 줄이므로 원장 안에만 들어가면 됨
+    return L<=bd.h && S<=bd.w;
   }
   function pickBoard(a,b,pref){
     if(!(a>0&&b>0)) return null;
@@ -1963,6 +1979,14 @@
     const f=list.find(bd=>fitsBoard(a,b,bd)); return f?{w:f.w,h:f.h}:null;
   }
   const bkey=bd=>bd?`${bd.w}x${bd.h}`:"";
+  // AI 메모를 보고 어느 칸이 의심스러운지 짐작 (못 찾으면 줄 전체)
+  function suspectFields(p){
+    const n=String(p.note||""), f=[];
+    if(/수량|개수|EA|ea|갯수/.test(n)) f.push("qty");
+    if(/두께|\dT\b/.test(n)) f.push("t");
+    if(/가로|세로|치수|길이|폭|사이즈/.test(n)) f.push("a","b");
+    return f;
+  }
   function renderAiParts(){
     if(!aiParts.length) return "";
     const list=boardSizesOf();
@@ -1973,20 +1997,21 @@
       <div class="ai-parts-head"><b>읽은 부품 ${aiParts.length}개</b><span>틀린 숫자는 여기서 바로 고치세요</span></div>
       ${tKeys.length>1?`<div class="ai-tsum">두께별: ${tKeys.map(k=>`<b>${escapeText(k)}</b> ${tCount[k]}개`).join(" · ")}</div>`:""}
       ${bad?`<div class="ai-badmsg">⛔ 등록된 원장보다 큰 부품이 ${bad}개 있어요. 원장을 고르거나, 설정 → 취급하는 원장에 크기를 추가해 주세요.</div>`:""}
-      ${aiParts.map((p,k)=>`<div class="ai-prow${p.unclear?" pat-warn":""}${!p.board?" ai-bad":""}" data-k="${k}">
-        <input class="input" data-f="a" type="number" inputmode="decimal" value="${p.a??""}" aria-label="치수1">
-        <span>×</span><input class="input" data-f="b" type="number" inputmode="decimal" value="${p.b??""}" aria-label="치수2">
-        <span>×</span><input class="input ai-q" data-f="qty" type="number" inputmode="numeric" value="${p.qty??1}" aria-label="수량"><span>개</span>
+      ${aiParts.map((p,k)=>{ const sus=p.unclear?suspectFields(p):[]; const hl=f=>sus.includes(f)?" ai-sus":""; return `<div class="ai-prow${p.unclear?" pat-warn":""}${!p.board?" ai-bad":""}" data-k="${k}">
+        <input class="input${hl("a")}" data-f="a" type="number" inputmode="decimal" value="${p.a??""}" aria-label="치수1">
+        <span>×</span><input class="input${hl("b")}" data-f="b" type="number" inputmode="decimal" value="${p.b??""}" aria-label="치수2">
+        <span>×</span><input class="input ai-q${hl("qty")}" data-f="qty" type="number" inputmode="numeric" value="${p.qty??1}" aria-label="수량"><span>개</span>
         <button type="button" class="pat-del" data-del="${k}" aria-label="빼기">✕</button>
         <div class="ai-prow2">
-          <label class="ai-t"><input class="input" data-f="t" type="number" inputmode="decimal" value="${p.t??""}" aria-label="두께"><span>T</span></label>
+          <label class="ai-t"><input class="input${hl("t")}" data-f="t" type="number" inputmode="decimal" value="${p.t??""}" aria-label="두께"><span>T</span></label>
           <select class="input ai-board" data-f="board" aria-label="원장">
             ${p.board?"":`<option value="" selected>맞는 원장 없음</option>`}
             ${list.map(bd=>`<option value="${bkey(bd)}"${p.board&&bkey(p.board)===bkey(bd)?" selected":""}${fitsBoard(Number(p.a),Number(p.b),bd)?"":" disabled"}>${bd.w}×${bd.h}</option>`).join("")}
           </select>
-          ${p.note||p.unclear?`<span class="ai-pnote">${p.unclear?"⚠ 확실하지 않아요. ":""}${escapeText(p.note||"")}</span>`:""}
+          <input class="input ai-note" data-f="note" type="text" value="${escapeText(p.note||"")}" placeholder="메모 (예: 문짝)" aria-label="메모">
         </div>
-      </div>`).join("")}
+        ${p.unclear?`<div class="ai-warnline"><span>⚠ 도면과 비교해 주세요. 숫자를 눌러 고칠 수 있어요.</span><button type="button" class="ai-okbtn" data-ok="${k}">✓ 맞아요</button></div>`:""}
+      </div>`; }).join("")}
       <button type="button" class="btn btn-primary ai-addall" id="aiAddAll">부품 ${aiParts.length}개 모두 추가</button>
     </div>`;
   }
@@ -2001,9 +2026,10 @@
   function bindAiBox(){
     const box=$("patAiStatus");
     box.querySelectorAll(".ai-prow input").forEach(inp=>inp.addEventListener("input",()=>{
-      const k=Number(inp.closest(".ai-prow").dataset.k); aiParts[k][inp.dataset.f]=inp.value;
-      if(aiParts[k].unclear){ aiParts[k].unclear=false; inp.closest(".ai-prow").classList.remove("pat-warn"); }
+      const row=inp.closest(".ai-prow"), k=Number(row.dataset.k); aiParts[k][inp.dataset.f]=inp.value;
+      if(inp.dataset.f!=="note" && aiParts[k].unclear){ aiParts[k].unclear=false; row.classList.remove("pat-warn"); row.querySelector(".ai-warnline")?.remove(); row.querySelectorAll(".ai-sus").forEach(x=>x.classList.remove("ai-sus")); }
     }));
+    box.querySelectorAll("[data-ok]").forEach(b=>b.addEventListener("click",()=>{ aiParts[Number(b.dataset.ok)].unclear=false; redrawAiBox(); }));
     box.querySelectorAll(".ai-prow input[data-f=a],.ai-prow input[data-f=b]").forEach(inp=>inp.addEventListener("change",()=>{
       const p=aiParts[Number(inp.closest(".ai-prow").dataset.k)];
       if(!(p.board&&fitsBoard(Number(p.a),Number(p.b),p.board))) p.board=pickBoard(Number(p.a),Number(p.b),aiPrefBoard);
@@ -2034,8 +2060,10 @@
     aiParts.forEach((p,k)=>{ const a=Number(p.a), b=Number(p.b), q=Math.floor(Number(p.qty)); (a>0&&b>0&&q>0?ok:bad).push(k); });
     if(bad.length){ toast(`${bad.map(k=>k+1).join(", ")}번째 줄의 치수나 수량을 확인해 주세요.`); return; }
     const noBoard=aiParts.map((p,k)=>p.board&&fitsBoard(Number(p.a),Number(p.b),p.board)?null:k+1).filter(Boolean);
+    const unchecked=aiParts.filter(p=>p.unclear).length;
+    if(!noBoard.length && unchecked && !confirm(`도면과 비교하지 않은 노란 줄이 ${unchecked}개 있어요.\n그래도 추가할까요?`)) return;
     if(noBoard.length){ toast(`${noBoard.join(", ")}번째 부품은 맞는 원장이 없어요. 원장을 고르거나 빼 주세요.`); return; }
-    aiParts.forEach(p=>parts.push({ w:Number(p.a), h:Number(p.b), qty:Math.floor(Number(p.qty)), rotate:true, boardW:p.board.w, boardH:p.board.h, boardT:Number(p.t)>0?Number(p.t):boardT, kerf, edgeTrim:getEdgeTrimMM(), mode:calcMode }));
+    aiParts.forEach(p=>parts.push({ w:Number(p.a), h:Number(p.b), qty:Math.floor(Number(p.qty)), rotate:true, boardW:p.board.w, boardH:p.board.h, boardT:Number(p.t)>0?Number(p.t):boardT, kerf, edgeTrim:getEdgeTrimMM(), mode:calcMode, note:String(p.note||"").trim().slice(0,40) }));
     const n=aiParts.length; aiParts=[];
     renderParts(); resetResult();
     aiHead=`<b>✓ 부품 ${n}개를 추가했어요.</b> 아래 <b>최적화 계산</b>을 누르면 원장 장수와 재단비가 나와요.`; aiKind="ok";
@@ -2050,7 +2078,7 @@
     aiParts=(Array.isArray(r.parts)?r.parts:[]).map(p=>({a:numOr(p.a), b:numOr(p.b), qty:Math.max(1,Math.floor(Number(p.qty)||1)), t:numOr(p.t), note:String(p.note||"").slice(0,60), unclear:!!p.unclear})).filter(p=>p.a||p.b);
     aiParts.forEach(p=>{ p.board=pickBoard(p.a,p.b,aiPrefBoard); });
     // 등록된 원장 어디에도 안 들어가는 부품은 손님 질문으로
-    aiParts.filter(p=>!p.board).forEach(p=>{ const q=`${p.a}×${p.b} 부품은 가지고 있는 원장(여유분 포함)보다 커서 한 장으로 나오지 않는데, 어떻게 진행할까요?`; if(!aiQuestions.includes(q)) aiQuestions_extra.push(q); });
+    aiParts.filter(p=>!p.board).forEach(p=>{ const q=`${p.a}×${p.b} 부품은 가지고 있는 원장보다 커서 한 장으로 나오지 않는데, 어떻게 진행할까요?`; if(!aiQuestions.includes(q)) aiQuestions_extra.push(q); });
     aiQuestions=(Array.isArray(r.questions)?r.questions:[]).map(q=>String(q||"").trim()).filter(Boolean).slice(0,8);
     aiQuestions=aiQuestions.concat(aiQuestions_extra).slice(0,8);
     const notes=[];
@@ -2626,13 +2654,14 @@
 
     // 혼합 배치에서는 해당 작업군의 모든 품목이 원장보다 작은 방향에
     // 기존 규칙대로 한쪽 20mm 여유를 적용한다.
-    const trimX=indexedParts.some(({part})=>
+    const trimX0=indexedParts.some(({part})=>
       mixedOrientationOptions(part).some(o=>Math.abs(o.w-boardH)<0.0001)
     ) ? 0 : getEdgeTrimMM();
 
-    const trimY=indexedParts.some(({part})=>
+    const trimY0=indexedParts.some(({part})=>
       mixedOrientationOptions(part).some(o=>Math.abs(o.h-boardW)<0.0001)
     ) ? 0 : getEdgeTrimMM();
+    const {tx:trimX,ty:trimY}=relaxTrims(boardW,boardH,indexedParts.map(({part})=>mixedOrientationOptions(part)),trimX0,trimY0);
 
     const usableLen=boardH-trimX;
     const usableWid=boardW-trimY;
@@ -3349,7 +3378,11 @@
       };
 
       renderResult();
-      toast("최적화 계산이 완료되었습니다.");
+      const T=getEdgeTrimMM(), relaxed=new Set();
+      profileResults.forEach(r=>r.sheets.forEach(sh=>{
+        [["길이",sh.trimX],["폭",sh.trimY]].forEach(([d,v])=>{ if(v>0.0001&&v<T-0.0001) relaxed.add(`${r.profile.boardW}×${r.profile.boardH} 원장 ${d} 방향 여유분 ${Math.round(v*10)/10}mm`); });
+      }));
+      toast(relaxed.size?`계산 완료 · ${[...relaxed].join(", ")}로 줄였어요.`:"최적화 계산이 완료되었습니다.");
     }catch(err){
       console.error(err);
       alert(`계산 중 오류가 발생했습니다.\n${err?.message || "입력값을 확인해 주세요."}`);
@@ -6160,6 +6193,10 @@
   .ai-prow .ai-t .input{flex:0 0 52px;width:52px;text-align:center;padding:4px}
   .ai-prow .input.ai-board{flex:0 1 150px;width:150px;height:36px;padding:0 26px 0 10px!important;line-height:36px!important;font-size:14px!important;-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-soft) 50%),linear-gradient(135deg,var(--ink-soft) 50%,transparent 50%);background-position:calc(100% - 14px) 16px,calc(100% - 9px) 16px;background-size:5px 5px;background-repeat:no-repeat}
   .ai-prow.ai-bad{background:#FDECEC;border-color:#F3A5A5}
+  .ai-prow .input.ai-note{flex:1 1 120px;width:auto;min-width:90px;height:36px;font-size:13.5px;padding:4px 10px}
+  .ai-prow .input.ai-sus{box-shadow:0 0 0 2px #F2B705 inset!important;background:#FFF3C4!important}
+  .ai-warnline{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#6B4E00}
+  .ai-okbtn{flex:0 0 auto;border:0;border-radius:9px;background:#1D8F50;color:#fff;font:inherit;font-size:12.5px;font-weight:800;padding:6px 10px;cursor:pointer}
   .ai-badmsg{font-size:12.5px;font-weight:700;color:var(--danger);background:#FDECEC;border-radius:8px;padding:6px 8px}
   .ai-tsum{font-size:12.5px;color:var(--ink-soft)}
   .ai-addall{width:100%;height:44px;margin-top:4px}
