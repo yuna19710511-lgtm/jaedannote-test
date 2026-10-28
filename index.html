@@ -2051,9 +2051,8 @@
     const onStage=k=>{ const now=Date.now(); done.push({k:stage,ms:now-stT}); stage=k; stT=now; draw(); };
     try{
       const onPartial=txt=>{
-        const found=[];
-        (txt.match(/\{[^{}]*"a"\s*:\s*[\d.]+[^{}]*\}/g)||[]).forEach(m=>{ try{ const p=JSON.parse(m); if(p.b) found.push(p); }catch(_){} });
-        const strips=(txt.match(/"repeat"\s*:/g)||[]).length;
+        const pr=window.jnAiParse?window.jnAiParse(txt):{parts:[],strips:[]};
+        const found=pr.parts, strips=pr.strips.length;
         if(found.length) live=`<div class="ai-live"><b>부품 ${found.length}개 읽음</b>${found.slice(-4).map(p=>`<span>${escapeText(String(p.a))} × ${escapeText(String(p.b))} × ${escapeText(String(p.qty??1))}</span>`).join("")}</div>`;
         else if(strips) live=`<div class="ai-live"><b>띠 ${strips}개 읽음</b></div>`;
         else live=`<div class="ai-live"><b>답을 받는 중…</b></div>`;
@@ -2068,7 +2067,13 @@
       const where=AI_STAGE_NAMES[stage]||"";
       patAiStatus(`<b>AI가 이번에는 도면을 못 읽었어요.</b> ${escapeText(err&&err.userMsg||"잠시 후 다시 해 주세요.")}
         <div class="ai-err-actions"><button type="button" class="btn btn-primary" data-ai-start>다시 하기</button><span>또는 아래 칸에 직접 입력해도 돼요.</span></div>
-        <div class="ai-time">멈춘 단계: ${escapeText(where)} · ${Math.round((Date.now()-t0)/1000)}초${err&&err.code?" · "+escapeText(String(err.code)):""}</div>`,"err");
+        <div class="ai-time">멈춘 단계: ${escapeText(where)} · ${Math.round((Date.now()-t0)/1000)}초${err&&err.code?" · "+escapeText(String(err.code)):""}</div>
+        ${err&&err.raw?`<details class="ai-raw"><summary>AI가 보낸 답 보기</summary><pre>${escapeText(err.raw)}</pre><button type="button" class="ai-copy" id="aiCopyRaw">복사</button></details>`:""}`,"err");
+      const cr=$("aiCopyRaw");
+      if(cr) cr.addEventListener("click",async()=>{
+        const t=err.raw; try{ await navigator.clipboard.writeText(t); }catch(_){ const ta=document.createElement("textarea"); ta.value=t; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(__){} ta.remove(); }
+        toast("AI 답을 복사했어요.");
+      });
     }finally{
       clearInterval(tick); patAiBusy=false; $("patAiBtn").disabled=false;
     }
@@ -4156,23 +4161,8 @@
         aiFc=fc;
         aiAppCheck=fc.initializeAppCheck(app,{provider:new fc.ReCaptchaEnterpriseProvider(RECAPTCHA_KEY),isTokenAutoRefreshEnabled:true});
         const ai=fai.getAI(app,{backend:new fai.GoogleAIBackend()});
-        const S=fai.Schema, num=()=>S.integer({nullable:true}), str=()=>S.string();
-        const responseSchema=S.object({
-          properties:{
-            kind:S.enumString({enum:["parts","pattern"]}),
-            parts:S.array({items:S.object({properties:{a:S.integer(),b:S.integer(),qty:S.integer(),note:str(),unclear:S.boolean()},optionalProperties:["note","unclear"]})}),
-            strip_side:S.enumString({enum:["long","short"]}),
-            strips:S.array({items:S.object({properties:{size:num(),rest:S.boolean(),repeat:S.integer(),split:S.enumString({enum:["none","list","div"]}),list:str(),n:S.integer(),unclear:S.boolean()},optionalProperties:["rest","list","n","unclear"]})}),
-            material:str(),
-            thickness:num(),
-            board:S.object({properties:{short:num(),long:num()}}),
-            pattern_boards:S.integer({nullable:true}),
-            notes:S.array({items:str()}),
-            questions:S.array({items:str()})
-          },
-          optionalProperties:["parts","strip_side","strips","material","thickness","board","pattern_boards","notes","questions"]
-        });
-        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:3000,thinkingConfig:{thinkingLevel:"MINIMAL"}}});
+        // Playground에서 성공한 설정 그대로: 글로 답하기 (JSON·형식 강제 없음)
+        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{maxOutputTokens:2000,thinkingConfig:{thinkingLevel:"MINIMAL"}}});
       })().catch(e=>{ aiModelP=null; throw e; });
       return aiModelP;
     }
@@ -4193,29 +4183,75 @@
         img.src=url;
       });
     }
-    const AI_DRAWING_PROMPT=`사진은 목재(합판·MDF 등) 재단 주문 도면이나 메모야. 손그림, 표, 문자 캡처, 스케치가 섞여 있을 수 있어.
-적힌 내용을 빠짐없이 읽어서 아래 JSON 하나로만 답해. 설명 글은 쓰지 마.
+    const AI_DRAWING_PROMPT=`사진은 목재(합판·MDF 등) 재단 주문 도면이나 메모야. 손그림, 표, 스케치가 섞여 있을 수 있어.
+적힌 내용을 읽어서 아래 형식의 줄로만 답해. 다른 말은 쓰지 마. 해당 없는 줄은 빼.
 
-{
-  "kind": "parts" 또는 "pattern",
-  "material": "자재 설명 그대로 (예: 18T UV) 없으면 빈 문자열",
-  "thickness": 두께 숫자(mm) 또는 null,
-  "board": {"short": 숫자 또는 null, "long": 숫자 또는 null},
-  "parts": [ {"a": 숫자, "b": 숫자, "qty": 정수, "note": "문짝 같은 메모", "unclear": true/false} ],
-  "strip_side": "long" 또는 "short",
-  "strips": [ {"size": 숫자 또는 null, "rest": true/false, "repeat": 정수, "split": "none"|"list"|"div", "list": "문자열", "n": 정수, "unclear": true/false} ],
-  "pattern_boards": 정수 또는 null,
-  "notes": ["손님이 적은 요청이나 메모"],
-  "questions": ["손님에게 보낼 확인 질문"]
-}
+종류: 부품목록 또는 재단패턴
+자재: 적힌 그대로 (예: 18T UV)
+두께: 숫자
+원장: 짧은변 x 긴변
+부품: 가로 x 세로 x 수량 | 메모 | ?
+띠방향: 긴변 또는 짧은변
+띠: 폭 x 반복 | 나누기 | ?
+장수: 숫자
+메모: 손님이 적은 말
+질문: 손님에게 물어볼 것
 
 규칙:
-- "가로 × 세로 × 수량"처럼 부품 치수 목록이 있으면 kind는 "parts". parts에 적힌 순서대로 한 줄씩 넣어. 수량이 없으면 1. 옆의 대략적인 배치 그림은 참고만 해.
-- 부품 목록 없이 원장 한 변을 따라 띠 폭이 나열된 재단 패턴 그림이면 kind는 "pattern". 띠 폭이 긴 변(2440 쪽)을 따라 있으면 strip_side "long", 짧은 변이면 "short". 같은 띠가 연달아 나오면 repeat로 묶고, 치수 없는 마지막 띠는 size null·rest true. 띠 안을 다시 자르면 split "list"와 list("1090, 나머지" 형식) 또는 같은 크기 N개면 split "div"와 n.
-- 고쳐 쓴 숫자, 흐린 숫자는 가장 그럴듯한 값을 넣고 unclear true로 하고, questions에 확인 질문을 넣어.
-- 두께(예: 18T → 18), 자재, 원장 크기, 장수가 적혀 있으면 넣고 없으면 null.
-- questions는 견적 전에 손님에게 꼭 물어야 할 것만 존댓말 한 문장씩 (예: "원장은 1220×2440 기준으로 보면 될까요?"). 도면에 이미 있는 건 묻지 마. 최대 5개.
+- 부품 치수 목록(가로×세로×수량)이 있으면 종류는 부품목록. 부품 하나당 "부품:" 한 줄. 수량이 없으면 1. 확실하지 않은 줄은 맨 끝에 ? 를 붙여.
+  예) 부품: 50 x 575 x 4 | 수량 고쳐 씀 | ?
+  예) 부품: 680 x 830 x 1 | 문짝 |
+- 부품 목록 없이 원장을 띠로 자르는 그림이면 종류는 재단패턴. 띠 폭이 긴 변(2440 쪽)을 따라 나열돼 있으면 띠방향: 긴변. 띠마다 "띠:" 한 줄. 같은 띠가 연달아 있으면 반복 개수로 묶어. 치수 없이 남는 띠는 폭에 "나머지".
+  나누기는 안 자르면 "그대로", 치수가 적혀 있으면 "1090, 나머지"처럼, 같은 크기 N개면 "N등분".
+  예) 띠: 590 x 3 | 그대로 |
+  예) 띠: 나머지 x 1 | 590, 590, 나머지 |
+- 원장 크기, 두께, 장수는 도면에 적혀 있을 때만 써.
+- 고쳐 쓴 숫자나 흐린 숫자는 가장 그럴듯한 값을 쓰고 ? 를 붙인 뒤, "질문:" 줄로 확인 질문을 써.
+- 질문은 견적 전에 꼭 물어야 할 것만, 존댓말 한 문장씩, 최대 5개. 도면에 이미 있는 건 묻지 마.
 - 도면에 없는 숫자를 지어내지 마.`;
+    // AI가 쓴 줄을 읽어서 칸에 넣을 모양으로 바꿈 (읽는 도중에도 씀)
+    function parseAiText(txt){
+      const r={kind:"",material:"",thickness:null,board:{short:null,long:null},parts:[],strip_side:"long",strips:[],pattern_boards:null,notes:[],questions:[]};
+      const nums=t=>(String(t).replace(/,(?=\d{3}\b)/g,"").match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+      String(txt||"").split(/\r?\n/).forEach(raw=>{
+        const line=raw.replace(/\*\*/g,"").replace(/^[\s\-*•·>]+/,"").trim();
+        const m=line.match(/^([^:：]{1,8})[:：]\s*(.*)$/);
+        if(!m){
+          // 형식을 안 지키고 "50 × 575 × 4 EA (문짝)"처럼 써도 부품으로 읽음
+          const d=line.match(/(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)(?:\s*[x×X*\-]\s*(\d+)\s*(?:EA|ea|개|장|매)?)?/);
+          if(d){ const note=(line.match(/[(（]([^)）]{1,30})[)）]/)||[])[1]||""; r.parts.push({a:Number(d[1]),b:Number(d[2]),qty:Number(d[3])||1,note:note.replace(/^메모\s*[:：]\s*/,""),unclear:/\?\s*$/.test(line)}); }
+          return;
+        }
+        const key=m[1].replace(/\s/g,""), val=m[2].trim();
+        const segs=val.split("|").map(x=>x.trim());
+        const unclear=/\?\s*$/.test(val)||segs.slice(1).some(x=>x==="?");
+        if(key==="종류") r.kind=/패턴/.test(val)?"pattern":"parts";
+        else if(key.includes("자재")||key.includes("두께")){
+          if(key.includes("자재")) r.material=val.slice(0,40);
+          const t=(val.match(/(\d+(?:\.\d+)?)\s*T\b/i)||[])[1]||(key.includes("두께")?nums(val)[0]:null);
+          if(t) r.thickness=Number(t);
+        }
+        else if(key==="원장"){ const n=nums(val); if(n.length>=2){ r.board={short:Math.min(n[0],n[1]),long:Math.max(n[0],n[1])}; } }
+        else if(key==="부품"){ const n=nums(segs[0]); if(n.length>=2) r.parts.push({a:n[0],b:n[1],qty:n[2]||1,note:(segs[1]&&segs[1]!=="?"?segs[1]:"").slice(0,60),unclear}); }
+        else if(key==="띠방향") r.strip_side=/짧/.test(val)?"short":"long";
+        else if(key==="띠"){
+          const rest=/나머지/.test(segs[0]); const n=nums(segs[0]);
+          const size=rest?null:(n[0]||null), repeat=rest?(n[0]||1):(n[1]||1);
+          const sp=(segs[1]||"").replace(/\?/g,"").trim();
+          let split="none", list="", dn=2;
+          const dv=sp.match(/(\d+)\s*등분/);
+          if(dv){ split="div"; dn=Number(dv[1]); }
+          else if(sp && !/그대로|없음/.test(sp)){ split="list"; list=sp; }
+          if(rest||size) r.strips.push({size,rest,repeat,split,list,n:dn,unclear});
+        }
+        else if(key==="장수"){ const n=nums(val)[0]; if(n) r.pattern_boards=Math.floor(n); }
+        else if(key==="메모"){ if(val) r.notes.push(val.slice(0,80)); }
+        else if(key==="질문"){ if(val) r.questions.push(val.slice(0,120)); }
+      });
+      if(!r.kind) r.kind=r.parts.length?"parts":(r.strips.length?"pattern":"");
+      return r;
+    }
+    window.jnAiParse=parseAiText;
     window.jnAiReadDrawing=async function(file,onStage,onPartial){
       const stage=k=>{ try{ onStage&&onStage(k); }catch(_){} };
       if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.code="proto"; e.userMsg="AI 기능은 AI 재단노트 인터넷 주소에서만 돼요."; throw e; }
@@ -4233,31 +4269,32 @@
       let tries=0;
       async function attempt(){
         const no=++tries;
-        const ctrl=new AbortController(); let txt="", got=false, why="";
+        const ctrl=new AbortController(); let txt="", got=false, why="", chunkErr="";
         const firstT=setTimeout(()=>{ if(!got){ why="first"; ctrl.abort(); } },FIRST_MS);
         const left=Math.max(5000,TOTAL_MS-(Date.now()-tStart));
         const totalT=setTimeout(()=>{ why="total"; ctrl.abort(); },left);
         try{
           const res=await model.generateContentStream(req,{signal:ctrl.signal,timeout:left});
           for await(const ch of res.stream){
-            let piece=""; try{ piece=ch.text(); }catch(_){}
+            let piece=""; try{ piece=ch.text(); }catch(ce){ chunkErr=String(ce&&ce.message||ce).slice(0,120); }
             if(!piece) continue;
             if(!got) console.info(`[AI] 첫 글자 ${((Date.now()-tStart)/1000).toFixed(1)}초 (시도 ${no})`);
             got=true; txt+=piece;
             try{ onPartial&&onPartial(txt); }catch(_){}
-            if(LOOP_RE.test(txt.slice(-160))){ why="loop"; console.warn(`[AI] 반복 감지 → 끊음 (시도 ${no})`); ctrl.abort(); break; }
+            const tailLines=txt.split("\n").slice(-9,-1);
+            if(LOOP_RE.test(txt.slice(-160)) || (tailLines.length>=8 && tailLines.every(x=>x.trim()&&x===tailLines[0]))){ why="loop"; console.warn(`[AI] 반복 감지 → 끊음 (시도 ${no})`); ctrl.abort(); break; }
           }
-          if(why==="loop") return {txt,fr:"LOOP"};
+          if(why==="loop") return {txt,fr:"LOOP",chunkErr};
           const fin=await res.response.catch(()=>null);
           const um=fin&&fin.usageMetadata; if(um) console.info("[AI] 토큰",um);
           const fr=fin&&fin.candidates&&fin.candidates[0]&&fin.candidates[0].finishReason;
           if(fr&&fr!=="STOP") console.warn("[AI] 끝난 이유:",fr,"글자수",txt.length);
-          return {txt,fr};
+          return {txt,fr,chunkErr};
         }catch(err){
-          if(why==="loop") return {txt,fr:"LOOP"};
+          if(why==="loop") return {txt,fr:"LOOP",chunkErr};
           console.warn(`[AI] 시도 ${no} 실패 (${why||"error"}) · 받은 글자 ${txt.length}`, txt.slice(0,600), err);
           const m=String(err&&(err.message||err.code)||"");
-          if(why==="first"||why==="total") return {txt,fr:"TIMEOUT",got};
+          if(why==="first"||why==="total") return {txt,fr:"TIMEOUT",got,chunkErr};
           const e=new Error(m); e.code="read-fail";
           if(/app.?check|attestation|recaptcha|401|403/i.test(m)) e.userMsg="보안 확인에 실패했어요. 잠시 후 다시 해 주세요.";
           else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
@@ -4266,27 +4303,20 @@
           throw e;   // 한도·연결 오류는 다시 보내지 않음
         }finally{ clearTimeout(firstT); clearTimeout(totalT); }
       }
-      const tryParse=out=>{
-        if(!out||out.fr!=="STOP"&&out.fr) return null;
-        const t=out.txt; try{ return JSON.parse(t.slice(t.indexOf("{"),t.lastIndexOf("}")+1)); }catch(_){ return null; }
-      };
-      // 끊긴 답에서 다 읽은 부품만 건짐
-      const salvage=t=>{
-        const parts=[];
-        (String(t||"").match(/\{[^{}]*"a"\s*:\s*\d+[^{}]*\}/g)||[]).forEach(m=>{ try{ const p=JSON.parse(m); if(p.a&&p.b) parts.push(p); }catch(_){} });
-        if(!parts.length) return null;
-        const mat=(String(t).match(/"material"\s*:\s*"([^"]{0,40})"/)||[])[1]||"";
-        return {kind:"parts",parts,material:mat,questions:["도면을 다시 확인해 보니 일부 부품이 빠졌을 수 있어요. 전체 부품 목록이 맞는지 확인 부탁드릴게요."],_partial:true};
-      };
-      let out=await attempt(), r=tryParse(out);
+      const valid=r=>r&&(r.parts.length||r.strips.length);
+      const tryParse=out=>{ if(!out||(out.fr&&out.fr!=="STOP")) return null; const r=parseAiText(out.txt); return valid(r)?r:null; };
+      const salvage=t=>{ const r=parseAiText(t); if(!valid(r)) return null; r._partial=true; return r; };
+      let out=await attempt(), r=tryParse(out), out2=null;
       if(!r && Date.now()-tStart<TOTAL_MS-8000){
         console.warn("[AI] 답이 온전하지 않아 한 번 더 시도",out.fr);
-        const out2=await attempt(); r=tryParse(out2);
+        out2=await attempt(); r=tryParse(out2);
         if(!r) r=salvage(out2.txt)||salvage(out.txt);
       }else if(!r) r=salvage(out.txt);
       if(r) return r;
-      const e=new Error(out.fr||"json"); e.code=out.fr==="TIMEOUT"?"read-timeout":"bad-answer";
-      e.userMsg=out.fr==="TIMEOUT"&&!out.got?"AI가 응답하지 않아 멈췄어요. 다시 해 주세요.":"AI가 이번에는 답을 제대로 못 만들었어요. 다시 해 주세요.";
+      const last=out2||out;
+      const e=new Error(last.fr||"bad"); e.code=last.fr==="TIMEOUT"?"read-timeout":"bad-answer";
+      e.userMsg=last.fr==="TIMEOUT"&&!last.got?"AI가 응답하지 않아 멈췄어요. 다시 해 주세요.":"AI 답에서 치수를 찾지 못했어요. 다시 해 주세요.";
+      e.raw=[out,out2].filter(Boolean).map((o,k)=>`[시도 ${k+1}] 끝난 이유: ${o.fr||"?"} · 글자 ${o.txt.length}${o.chunkErr?" · "+o.chunkErr:""}\n${o.txt.slice(0,1200)}`).join("\n\n");
       throw e;
     };
 
@@ -6027,6 +6057,9 @@
   .ai-steps span.on{background:#DDF1E4;color:#1D5B36}
   .ai-steps span.now{background:var(--blue);color:#fff}
   .ai-time{margin-top:8px;font-size:11.5px;opacity:.75}
+  .ai-raw{margin-top:8px;font-size:12px;color:var(--ink-soft)}
+  .ai-raw summary{cursor:pointer;font-weight:700}
+  .ai-raw pre{white-space:pre-wrap;word-break:break-all;max-height:220px;overflow:auto;background:#fff;border-radius:8px;padding:8px;margin:6px 0;font-size:11.5px}
   .ai-live{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:8px;font-size:12.5px}
   .ai-live b{flex-basis:100%;color:var(--blue-deep)}
   .ai-live span{background:#fff;border-radius:7px;padding:2px 8px;font-weight:700}
