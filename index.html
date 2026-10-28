@@ -2018,6 +2018,7 @@
       if(warnN) aiHead+=`<br>⚠ 노란 줄 ${warnN}개는 AI가 확실히 못 읽은 부분이에요.`;
       aiKind=warnN||aiQuestions.length?"warn":"ok";
     }
+    if(r._partial) aiHead+=`<br>⚠ AI 답이 중간에 끊겨서 <b>일부 부품만</b> 읽혔을 수 있어요. 도면과 꼭 비교해 주세요.`;
     if(notes.length) aiHead+=`<ul>${notes.map(x=>`<li>${escapeText(x)}</li>`).join("")}</ul>`;
     aiFoot=timing?`<div class="ai-time">${escapeText(timing)}</div>`:"";
     redrawAiBox();
@@ -4155,11 +4156,11 @@
         aiFc=fc;
         aiAppCheck=fc.initializeAppCheck(app,{provider:new fc.ReCaptchaEnterpriseProvider(RECAPTCHA_KEY),isTokenAutoRefreshEnabled:true});
         const ai=fai.getAI(app,{backend:new fai.GoogleAIBackend()});
-        const S=fai.Schema, num=()=>S.number({nullable:true}), str=()=>S.string();
+        const S=fai.Schema, num=()=>S.integer({nullable:true}), str=()=>S.string();
         const responseSchema=S.object({
           properties:{
             kind:S.enumString({enum:["parts","pattern"]}),
-            parts:S.array({items:S.object({properties:{a:S.number(),b:S.number(),qty:S.integer(),note:str(),unclear:S.boolean()},optionalProperties:["note","unclear"]})}),
+            parts:S.array({items:S.object({properties:{a:S.integer(),b:S.integer(),qty:S.integer(),note:str(),unclear:S.boolean()},optionalProperties:["note","unclear"]})}),
             strip_side:S.enumString({enum:["long","short"]}),
             strips:S.array({items:S.object({properties:{size:num(),rest:S.boolean(),repeat:S.integer(),split:S.enumString({enum:["none","list","div"]}),list:str(),n:S.integer(),unclear:S.boolean()},optionalProperties:["rest","list","n","unclear"]})}),
             material:str(),
@@ -4171,7 +4172,7 @@
           },
           optionalProperties:["parts","strip_side","strips","material","thickness","board","pattern_boards","notes","questions"]
         });
-        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:6144,thinkingConfig:{thinkingLevel:"MINIMAL"}}});
+        return fai.getGenerativeModel(ai,{model:AI_MODEL,generationConfig:{responseMimeType:"application/json",responseSchema,maxOutputTokens:3000,thinkingConfig:{thinkingLevel:"MINIMAL"}}});
       })().catch(e=>{ aiModelP=null; throw e; });
       return aiModelP;
     }
@@ -4228,7 +4229,10 @@
       stage("read");
       const req=[AI_DRAWING_PROMPT,{inlineData:{data,mimeType:"image/jpeg"}}];
       const FIRST_MS=25000, TOTAL_MS=70000, tStart=Date.now();
-      async function attempt(no){
+      const LOOP_RE=/([0-9.])\1{24,}|(\b\w+\b)(?:\s*,?\s*\2\b){15,}/;   // 같은 글자·단어를 끝없이 반복하면 바로 끊음
+      let tries=0;
+      async function attempt(){
+        const no=++tries;
         const ctrl=new AbortController(); let txt="", got=false, why="";
         const firstT=setTimeout(()=>{ if(!got){ why="first"; ctrl.abort(); } },FIRST_MS);
         const left=Math.max(5000,TOTAL_MS-(Date.now()-tStart));
@@ -4237,32 +4241,53 @@
           const res=await model.generateContentStream(req,{signal:ctrl.signal,timeout:left});
           for await(const ch of res.stream){
             let piece=""; try{ piece=ch.text(); }catch(_){}
-            if(piece){ if(!got) console.info(`[AI] 첫 글자 ${((Date.now()-tStart)/1000).toFixed(1)}초 (시도 ${no})`); got=true; txt+=piece; try{ onPartial&&onPartial(txt); }catch(_){} }
+            if(!piece) continue;
+            if(!got) console.info(`[AI] 첫 글자 ${((Date.now()-tStart)/1000).toFixed(1)}초 (시도 ${no})`);
+            got=true; txt+=piece;
+            try{ onPartial&&onPartial(txt); }catch(_){}
+            if(LOOP_RE.test(txt.slice(-160))){ why="loop"; console.warn(`[AI] 반복 감지 → 끊음 (시도 ${no})`); ctrl.abort(); break; }
           }
+          if(why==="loop") return {txt,fr:"LOOP"};
           const fin=await res.response.catch(()=>null);
           const um=fin&&fin.usageMetadata; if(um) console.info("[AI] 토큰",um);
           const fr=fin&&fin.candidates&&fin.candidates[0]&&fin.candidates[0].finishReason;
           if(fr&&fr!=="STOP") console.warn("[AI] 끝난 이유:",fr,"글자수",txt.length);
           return {txt,fr};
         }catch(err){
-          console.warn(`[AI] 시도 ${no} 실패 (${why||"error"}) · 받은 글자 ${txt.length}`, txt.slice(0,1500), err);
-          // 한도 오류(429)·연결 오류는 다시 보내지 않음 (하루 한도를 아끼기 위해). 응답이 아예 없을 때만 한 번 더.
-          if(why==="first"&&no===1&&!/429|quota|exhausted|rate/i.test(String(err&&err.message))) return attempt(2);
-          const e=new Error(String(err&&err.message||why));
-          if(why==="first"||why==="total"){ e.code="read-timeout"; e.userMsg=got?"AI 답이 너무 길어져서 멈췄어요. 다시 해 주세요.":"AI가 응답하지 않아 멈췄어요. 다시 해 주세요."; throw e; }
-          const m=String(err&&(err.message||err.code)||""); e.code="read-fail";
+          if(why==="loop") return {txt,fr:"LOOP"};
+          console.warn(`[AI] 시도 ${no} 실패 (${why||"error"}) · 받은 글자 ${txt.length}`, txt.slice(0,600), err);
+          const m=String(err&&(err.message||err.code)||"");
+          if(why==="first"||why==="total") return {txt,fr:"TIMEOUT",got};
+          const e=new Error(m); e.code="read-fail";
           if(/app.?check|attestation|recaptcha|401|403/i.test(m)) e.userMsg="보안 확인에 실패했어요. 잠시 후 다시 해 주세요.";
           else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
           else if(/network|fetch|offline/i.test(m)) e.userMsg="인터넷 연결을 확인해 주세요.";
           else e.userMsg="AI 연결에 문제가 생겼어요. 다시 해 주세요.";
-          throw e;
+          throw e;   // 한도·연결 오류는 다시 보내지 않음
         }finally{ clearTimeout(firstT); clearTimeout(totalT); }
       }
-      const out=await attempt(1);
-      const txt=out.txt;
-      if(out.fr==="MAX_TOKENS"){ const e=new Error("max"); e.code="max-tokens"; e.userMsg="AI 답이 너무 길어져서 멈췄어요. 다시 해 주세요."; console.warn("[AI] 길이 상한 도달",txt.slice(0,1500)); throw e; }
-      const j=txt.slice(txt.indexOf("{"),txt.lastIndexOf("}")+1);
-      try{ return JSON.parse(j); }catch(_){ const e=new Error("json"); e.code="json"; e.userMsg="AI 답을 정리하지 못했어요. 다시 해 주세요."; throw e; }
+      const tryParse=out=>{
+        if(!out||out.fr!=="STOP"&&out.fr) return null;
+        const t=out.txt; try{ return JSON.parse(t.slice(t.indexOf("{"),t.lastIndexOf("}")+1)); }catch(_){ return null; }
+      };
+      // 끊긴 답에서 다 읽은 부품만 건짐
+      const salvage=t=>{
+        const parts=[];
+        (String(t||"").match(/\{[^{}]*"a"\s*:\s*\d+[^{}]*\}/g)||[]).forEach(m=>{ try{ const p=JSON.parse(m); if(p.a&&p.b) parts.push(p); }catch(_){} });
+        if(!parts.length) return null;
+        const mat=(String(t).match(/"material"\s*:\s*"([^"]{0,40})"/)||[])[1]||"";
+        return {kind:"parts",parts,material:mat,questions:["도면을 다시 확인해 보니 일부 부품이 빠졌을 수 있어요. 전체 부품 목록이 맞는지 확인 부탁드릴게요."],_partial:true};
+      };
+      let out=await attempt(), r=tryParse(out);
+      if(!r && Date.now()-tStart<TOTAL_MS-8000){
+        console.warn("[AI] 답이 온전하지 않아 한 번 더 시도",out.fr);
+        const out2=await attempt(); r=tryParse(out2);
+        if(!r) r=salvage(out2.txt)||salvage(out.txt);
+      }else if(!r) r=salvage(out.txt);
+      if(r) return r;
+      const e=new Error(out.fr||"json"); e.code=out.fr==="TIMEOUT"?"read-timeout":"bad-answer";
+      e.userMsg=out.fr==="TIMEOUT"&&!out.got?"AI가 응답하지 않아 멈췄어요. 다시 해 주세요.":"AI가 이번에는 답을 제대로 못 만들었어요. 다시 해 주세요.";
+      throw e;
     };
 
     const JOBS_KEY="jn_jobs_v1", CUR_KEY="jn_current_v1";
