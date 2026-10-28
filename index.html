@@ -943,8 +943,8 @@
 
       <div class="detail-panel right-panel" id="detailPanel" hidden>
         <section class="detail-block">
-          <h3>두께별 원장</h3>
-          <div class="thickness-breakdown" id="thicknessBreakdown"><div class="thickness-empty">두께별 판재수가 표시됩니다</div></div>
+          <h3 class="bd-head">원장별 필요 수량 <button type="button" class="ai-copy" id="copyOrderBtn">발주 문구 복사</button></h3>
+          <div class="thickness-breakdown" id="thicknessBreakdown"><div class="thickness-empty">두께·원장(4×8, 4×10)별 수량이 표시됩니다</div></div>
         </section>
         <section class="detail-block">
           <h3>재단비 내역</h3>
@@ -1374,7 +1374,8 @@
     $("productionCount").textContent="-";
     const thicknessBox=$("thicknessBreakdown");
     if(thicknessBox){
-      thicknessBox.innerHTML='<div class="thickness-empty">두께별 판재수가 표시됩니다</div>';
+      thicknessBox.innerHTML='<div class="thickness-empty">두께·원장(4×8, 4×10)별 수량이 표시됩니다</div>';
+      if($("sheetSub")) $("sheetSub").textContent="";
     }
   }
 
@@ -3090,10 +3091,12 @@
         grouped.set(key,{
           thickness:Number(entry.thickness),
           sheetCount:0,
-          cutCount:0
+          cutCount:0,
+          boards:{}
         });
       }
       const group=grouped.get(key);
+      if(entry.board) group.boards[entry.board]=(group.boards[entry.board]||0)+(Number(entry.sheetCount)||0);
       group.sheetCount+=Number(entry.sheetCount)||0;
       group.cutCount+=Number(entry.cutCount)||0;
     });
@@ -3133,7 +3136,7 @@
               <strong>단가 설정 필요</strong>
             </div>
             <div class="fee-row-detail">
-              ${detail.sheetCount.toLocaleString()}장 ·
+              ${Object.keys(detail.boards||{}).length?Object.entries(detail.boards).map(([b,c])=>`${b} ${c.toLocaleString()}장`).join(" + "):`${detail.sheetCount.toLocaleString()}장`} ·
               ${detail.cutCount.toLocaleString()}회
             </div>
           </div>`;
@@ -3146,7 +3149,7 @@
             <strong>${detail.fee.toLocaleString()}원</strong>
           </div>
           <div class="fee-row-detail">
-            ${detail.sheetCount.toLocaleString()}장 ·
+            ${Object.keys(detail.boards||{}).length?Object.entries(detail.boards).map(([b,c])=>`${b} ${c.toLocaleString()}장`).join(" + "):`${detail.sheetCount.toLocaleString()}장`} ·
             ${detail.cutCount.toLocaleString()}회 ·
             ${settings.feeMode==="sheet"?"장당":"컷당"} ${detail.baseRate.toLocaleString()}원
             ${detail.discountPercent>0
@@ -3169,7 +3172,8 @@
       return {
         thickness:item.part.boardT,
         sheetCount:item.boardCount,
-        cutCount:cutsPerSheet*item.boardCount
+        cutCount:cutsPerSheet*item.boardCount,
+        board:boardName(item.part.boardW,item.part.boardH)
       };
     });
     const reverseTotalCuts=reverseFeeEntries
@@ -3177,28 +3181,7 @@
     $("cutCount").textContent=`${reverseTotalCuts.toLocaleString()}회`;
     renderFeeResult(buildFeeDetails(reverseFeeEntries));
 
-    // 두께별 보유 원장 수
-    const thicknessCounts=new Map();
-    r.itemResults.forEach(item=>{
-      const key=`${item.part.boardT}mm`;
-      thicknessCounts.set(key,(thicknessCounts.get(key)||0)+item.boardCount);
-    });
-
-    let thicknessBox=$("thicknessBreakdown");
-    if(!thicknessBox){
-      thicknessBox=document.createElement("div");
-      thicknessBox.id="thicknessBreakdown";
-      thicknessBox.className="thickness-breakdown";
-      $("sheetCount").closest(".metric").insertAdjacentElement("afterend",thicknessBox);
-    }
-    thicknessBox.innerHTML=[...thicknessCounts.entries()]
-      .sort((a,b)=>parseFloat(b[0])-parseFloat(a[0]))
-      .map(([thickness,count])=>`
-        <div class="thickness-row">
-          <span>두께 ${thickness}</span>
-          <strong>${count.toLocaleString()}장</strong>
-        </div>`)
-      .join("");
+    renderBoardCounts();
 
     $("statusList").innerHTML=r.itemResults.map((item,i)=>`
       <div class="part-status">
@@ -3226,7 +3209,7 @@
           <div class="pattern-head-main">
             <span class="pattern-site-name">${$("siteName").value.trim() || "현장명 미입력"}</span>
             <span>
-              패턴 ${index+1} · 두께 ${part.boardT.toLocaleString()}mm ·
+              패턴 ${index+1} · 두께 ${part.boardT.toLocaleString()}mm · 원장 <b>${boardName(part.boardW,part.boardH)}</b> ·
               원장 1장당 ${item.capacity.toLocaleString()}개 ·
               <b>재단 사이즈: ${part.pat ? escapeText(part.patText) : `${part.w.toLocaleString()}×${part.h.toLocaleString()}mm`}</b>
             </span>
@@ -3389,7 +3372,46 @@
     }
   }
 
+  // v97: 원장 크기를 현장 이름으로 (1220×2440 → 4×8, 1220×3050 → 4×10, 1525 폭 → 5×…)
+  function boardName(w,h){
+    const S=Math.min(w,h), L=Math.max(w,h);
+    const sf={1220:"4",1525:"5"}[S], lf={2440:"8",3050:"10"}[L];
+    return sf&&lf?`${sf}×${lf}`:`${S}×${L}`;
+  }
+  // [{t,w,h,count}] → 두께·원장별로 합침 (두께 큰 것부터)
+  function boardCountRows(entries){
+    const m=new Map();
+    entries.forEach(e=>{ const S=Math.min(e.w,e.h), L=Math.max(e.w,e.h); const k=`${e.t}|${S}|${L}`; const o=m.get(k)||{t:Number(e.t),w:S,h:L,count:0}; o.count+=Number(e.count)||0; m.set(k,o); });
+    return [...m.values()].sort((a,b)=>b.t-a.t||a.w*a.h-b.w*b.h);
+  }
+  function boardCountEntries(){
+    if(!lastResult) return [];
+    if(lastResult.profileResults) return lastResult.profileResults.map(r=>({t:r.profile.boardT,w:r.profile.boardW,h:r.profile.boardH,count:r.sheets.length}));
+    if(lastResult.itemResults) return lastResult.itemResults.map(it=>({t:it.part.boardT,w:it.part.boardW,h:it.part.boardH,count:it.boardCount}));
+    return [];
+  }
+  function orderText(){
+    return boardCountRows(boardCountEntries()).map(r=>`${r.t}T ${boardName(r.w,r.h)} — ${r.count.toLocaleString()}매`).join("\n");
+  }
+  function renderBoardCounts(){
+    const rows=boardCountRows(boardCountEntries());
+    let box=$("thicknessBreakdown");
+    if(!box){ box=document.createElement("div"); box.id="thicknessBreakdown"; box.className="thickness-breakdown"; $("sheetCount").closest(".metric").insertAdjacentElement("afterend",box); }
+    box.innerHTML=rows.map(r=>`
+        <div class="thickness-row">
+          <span>${r.t.toLocaleString()}T · <b>${boardName(r.w,r.h)}</b> <small class="bd-mm">${r.w}×${r.h}</small></span>
+          <strong>${r.count.toLocaleString()}장</strong>
+        </div>`).join("");
+    // 총 판재수 아래: 원장 크기별 합계
+    const bySize=new Map(); rows.forEach(r=>{ const k=boardName(r.w,r.h); bySize.set(k,(bySize.get(k)||0)+r.count); });
+    let sub=$("sheetSub");
+    if(!sub){ sub=document.createElement("small"); sub.id="sheetSub"; sub.className="metric-sub"; $("sheetCount").insertAdjacentElement("afterend",sub); }
+    sub.textContent=[...bySize.entries()].map(([k,c])=>`${k} ${c.toLocaleString()}`).join(" · ");
+  }
+
   function getThicknessSheetSummary(){
+    const rows=boardCountRows(boardCountEntries());
+    if(rows.length) return rows.map(r=>`${r.t.toLocaleString()}T ${boardName(r.w,r.h)} ${r.count.toLocaleString()}장`).join(" · ");
     if(!lastResult) return "";
 
     // 일반 최적화 모드
@@ -3460,39 +3482,19 @@
     const targetFeeEntries=r.profileResults.map(({profile,sheets,cutCount})=>({
       thickness:profile.boardT,
       sheetCount:sheets.length,
-      cutCount
+      cutCount,
+      board:boardName(profile.boardW,profile.boardH)
     }));
     renderFeeResult(buildFeeDetails(targetFeeEntries));
-
-    // 두께별 판재 수
-    const thicknessCounts=new Map();
-    r.profileResults.forEach(({profile,sheets})=>{
-      const key=`${profile.boardT}mm`;
-      thicknessCounts.set(key,(thicknessCounts.get(key)||0)+sheets.length);
-    });
 
     $("statusList").innerHTML=parts.map((p,i)=>`
       <div class="part-status">
         <div class="part-code">${codeFor(i)}</div>
-        <div>${escapeText(partTitle(p))} · 두께 ${p.boardT.toLocaleString()}mm</div>
+        <div>${escapeText(partTitle(p))} · 두께 ${p.boardT.toLocaleString()}mm · ${boardName(p.boardW,p.boardH)}</div>
         <div class="qty">${p.div ? `원장 ${divBoardsOf(p).toLocaleString()}장<br>` : ""}${p.pat ? `원장 ${p.patBoards.toLocaleString()}장<br>` : ""}${p.qty.toLocaleString()}개</div>
       </div>`).join("");
 
-    let thicknessBox=$("thicknessBreakdown");
-    if(!thicknessBox){
-      thicknessBox=document.createElement("div");
-      thicknessBox.id="thicknessBreakdown";
-      thicknessBox.className="thickness-breakdown";
-      $("sheetCount").closest(".metric").insertAdjacentElement("afterend",thicknessBox);
-    }
-    thicknessBox.innerHTML=[...thicknessCounts.entries()]
-      .sort((a,b)=>parseFloat(b[0])-parseFloat(a[0]))
-      .map(([t,count])=>`
-        <div class="thickness-row">
-          <span>두께 ${t}</span>
-          <strong>${count.toLocaleString()}장</strong>
-        </div>`)
-      .join("");
+    renderBoardCounts();
 
     const area=$("previewArea");
     area.innerHTML="";
@@ -3510,7 +3512,7 @@
           <div class="pattern-head">
             <div class="pattern-head-main">
               <span class="pattern-site-name">${$("siteName").value.trim() || "현장명 미입력"}</span>
-              <span>패턴 ${patternIndex} · 두께 ${profile.boardT.toLocaleString()}mm · 이 패턴으로 ${group.count.toLocaleString()}장 재단</span>
+              <span>패턴 ${patternIndex} · 두께 ${profile.boardT.toLocaleString()}mm · 원장 <b>${boardName(profile.boardW,profile.boardH)}</b> (${profile.boardW}×${profile.boardH}) · 이 패턴으로 ${group.count.toLocaleString()}장 재단</span>
               <span class="pattern-cut-sizes"><b>재단 사이즈:</b> ${getSheetCutSizeSummary(profile,sheet)}</span>
             </div>
             <div class="pattern-head-right">
@@ -3758,6 +3760,12 @@
   }
 
   $("addPartBtn").addEventListener("click",addPart);
+  $("copyOrderBtn").addEventListener("click",async()=>{
+    const t=orderText(); if(!t){ toast("먼저 최적화 계산을 해 주세요."); return; }
+    const site=$("siteName").value.trim(); const full=(site?`[${site}]\n`:"")+t;
+    try{ await navigator.clipboard.writeText(full); }catch(_){ const ta=document.createElement("textarea"); ta.value=full; document.body.appendChild(ta); ta.select(); try{document.execCommand("copy");}catch(__){} ta.remove(); }
+    toast("발주 문구를 복사했어요.");
+  });
   $("addDivBtn").addEventListener("click",addDivisionPart);
   $("addPatBtn").addEventListener("click",addPatternPart);
   $("patAddStrip").addEventListener("click",()=>{ patStrips.push({size:"",rest:false,rep:1,split:"none",list:"",n:2}); renderPatStrips(); const ins=$("patStrips").querySelectorAll(".pat-size"); ins[ins.length-1]?.focus(); });
@@ -6196,6 +6204,11 @@
   .ai-prow .input.ai-note{flex:1 1 120px;width:auto;min-width:90px;height:36px;font-size:13.5px;padding:4px 10px}
   .ai-prow .input.ai-sus{box-shadow:0 0 0 2px #F2B705 inset!important;background:#FFF3C4!important}
   .ai-warnline{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#6B4E00}
+  .metric-sub{display:block;margin-top:4px;font-size:12.5px;font-weight:700;color:var(--ink-soft);letter-spacing:-.1px}
+  #feeMetric .metric-sub,.metric.fee .metric-sub{color:rgba(255,255,255,.85)}
+  .bd-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .bd-head .ai-copy{font-size:12px;padding:5px 10px}
+  .thickness-row .bd-mm{font-size:11px;color:var(--ink-mute);font-weight:600;margin-left:2px}
   .ai-okbtn{flex:0 0 auto;border:0;border-radius:9px;background:#1D8F50;color:#fff;font:inherit;font-size:12.5px;font-weight:800;padding:6px 10px;cursor:pointer}
   .ai-badmsg{font-size:12.5px;font-weight:700;color:var(--danger);background:#FDECEC;border-radius:8px;padding:6px 8px}
   .ai-tsum{font-size:12.5px;color:var(--ink-soft)}
