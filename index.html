@@ -858,24 +858,24 @@
         <div class="input-kind" role="tablist">
           <button type="button" class="kind-btn active" data-kind="size">치수로</button>
           <button type="button" class="kind-btn" data-kind="div">등분으로</button>
-          <button type="button" class="kind-btn" data-kind="pat">도면대로</button>
+          <button type="button" class="kind-btn" data-kind="pat">모양대로</button>
         </div>
         <div class="pat-inputs" id="patInputs" hidden>
           <div class="pat-dir" role="radiogroup" aria-label="첫 재단 방향">
-            <span class="pat-dir-label">먼저 자르는 방향</span>
+            <span class="pat-dir-label">1차 재단 방향</span>
             <div class="pat-dir-btns">
-              <button type="button" class="pat-dir-btn active" data-dir="len">길이 방향으로 띠</button>
-              <button type="button" class="pat-dir-btn" data-dir="wid">폭 방향으로 띠</button>
+              <button type="button" class="pat-dir-btn active" data-dir="len">길이 방향 먼저</button>
+              <button type="button" class="pat-dir-btn" data-dir="wid">폭 방향 먼저</button>
             </div>
           </div>
           <div class="pat-strips" id="patStrips"></div>
-          <button type="button" class="pat-add-strip" id="patAddStrip">+ 띠 추가</button>
+          <button type="button" class="pat-add-strip" id="patAddStrip">+ 1차 재단 추가</button>
           <div class="pat-preview" id="patPreview"></div>
           <div class="pat-bottom">
             <div class="field"><label for="patBoards" id="patBoardsLabel">이 패턴 장수</label><input class="input" id="patBoards" type="number" inputmode="numeric" min="1" step="1" value="1"></div>
             <button class="btn btn-primary add-btn" id="addPatBtn" type="button">추가</button>
           </div>
-          <p class="pat-hint">도면에 적힌 치수 그대로 자르고, 원장은 늘리지 않아요. <b>나머지</b>는 남은 길이에서 톱날 두께를 빼고 계산해요. 숫자 없이 남는 부분은 자투리로 표시돼요.</p>
+          <p class="pat-hint">손님이 자르는 모양까지 정해서 보낸 도면용이에요. 원장을 먼저 길게 자르는 폭(<b>1차 재단</b>)을 넣고, 그 조각을 어떻게 나눌지 고르세요. <b>자투리</b>를 누르면 남는 폭(톱날 두께 뺀 만큼)을 그대로 부품으로 써요. 숫자 없이 남는 부분은 버리는 자투리로 표시돼요.</p>
         </div>
         <div class="div-inputs" id="divInputs" hidden>
           <div class="field"><label for="divW" id="divWLabel">폭 ÷</label><input class="input" id="divW" type="number" inputmode="numeric" min="1" step="1" placeholder="예: 5"></div>
@@ -984,6 +984,12 @@
         <button class="ios-row ios-action" id="switchCompany" type="button">업체 바꾸기</button>
       </div>
       <p class="ios-foot">업체명과 로고를 지우고 처음 화면에서 새 업체명을 받습니다. 단가표와 작업 중인 부품은 그대로 남아요.</p>
+
+      <div class="ios-title">취급하는 원장</div>
+      <div class="ios-group">
+        <label class="ios-row" for="setBoards"><span class="ios-label">원장 크기</span><input class="ios-input" id="setBoards" type="text" placeholder="예: 1220x2440, 1220x3050"></label>
+      </div>
+      <p class="ios-foot">쉼표로 나눠 적어요. AI가 도면을 읽으면 부품마다 들어가는 가장 작은 원장을 여기서 골라요.</p>
 
       <div class="ios-title">재단비</div>
       <div class="ios-group">
@@ -1167,9 +1173,11 @@
   const DEFAULT_SETTINGS={
     companyName:"",logo:"",showFee:true,feeMode:"cut",
     rates:[{min:2.7,max:8.5,rate:4000},{min:9,max:18,rate:6000},{min:20,max:30,rate:10000}],
-    discounts:[{minSheets:10,percent:0},{minSheets:30,percent:0}]
+    discounts:[{minSheets:10,percent:0},{minSheets:30,percent:0}],
+    boardSizes:[{w:1220,h:2440},{w:1220,h:3050},{w:1525,h:2440},{w:1525,h:3050}]
   };
   const cloneDefaults=()=>JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+  function boardSizesOf(){ const b=settings&&Array.isArray(settings.boardSizes)&&settings.boardSizes.filter(x=>x&&x.w>0&&x.h>0); return b&&b.length?b:cloneDefaults().boardSizes; }
   let settings=loadSettings();
 
   function loadSettings(){
@@ -1224,6 +1232,7 @@
   }
   function openSettings(){
     $("setCompany").value=settings.companyName||"";
+    $("setBoards").value=boardSizesOf().map(b=>`${b.w}x${b.h}`).join(", ");
     setLogoPreview(settings.logo||"");
     $("setShowFee").checked=settings.showFee!==false;
     const mode=settings.feeMode==="sheet"?"sheet":"cut";
@@ -1272,7 +1281,14 @@
         return;
       }
     }
+    const boardSizes=[];
+    for(const t of $("setBoards").value.split(/[,，\n]/).map(x=>x.trim()).filter(Boolean)){
+      const n=(t.match(/\d+/g)||[]).map(Number);
+      if(n.length<2||!(n[0]>0&&n[1]>0)){ alert(`원장 크기 "${t}"를 읽을 수 없어요. 1220x2440처럼 적어 주세요.`); return; }
+      boardSizes.push({w:Math.min(n[0],n[1]),h:Math.max(n[0],n[1])});
+    }
     settings={
+      boardSizes:boardSizes.length?boardSizes:cloneDefaults().boardSizes,
       companyName:$("setCompany").value.trim(),
       logo:$("setLogoPreview").dataset.value||"",
       showFee:$("setShowFee").checked,
@@ -1374,7 +1390,7 @@
       const del=`<button class="delete-row" type="button" data-i="${i}" aria-label="${codeFor(i)} 삭제">삭제</button>`;
       if(p.pat){
         return `<tr class="pr">
-          <td class="pr-main">${chip}<span class="pr-text"><b class="pr-dim">도면대로 · 장당 ${p.patPer.toLocaleString()}조각</b><span class="pr-sub">${escapeText(p.patText)} · ${p.boardT.toLocaleString()}T</span></span></td>
+          <td class="pr-main">${chip}<span class="pr-text"><b class="pr-dim">모양대로 · 장당 ${p.patPer.toLocaleString()}조각</b><span class="pr-sub">${escapeText(p.patText)} · ${p.boardT.toLocaleString()}T</span></span></td>
           <td class="pr-qty"><b>${p.patBoards.toLocaleString()}</b>장<span class="pr-sub">${(p.patBoards*p.patPer).toLocaleString()}조각</span></td>
           <td class="pr-del">${del}</td></tr>`;
       }
@@ -1774,7 +1790,7 @@
   // 좌표: x = 길이(2440) 방향, y = 폭(1220) 방향. 결과 도면과 같은 기준.
   let patDir="len";
   let patStrips=[{size:"",rest:false,rep:1,split:"none",list:"",n:2}];
-  const isRestToken=t=>/^(나머지|나|n|N|\*|r|R)$/.test(t);
+  const isRestToken=t=>/^(나머지|자투리|나|자|n|N|\*|r|R)$/.test(t);
   const r1p=v=>Math.round(v*10)/10;
 
   // "1090, 나머지" → [1090,null]
@@ -1784,11 +1800,11 @@
     for(const t of toks){
       if(isRestToken(t)){ out.push(null); continue; }
       const v=Number(t);
-      if(!(v>0)) return {error:`"${t}"는 치수로 읽을 수 없어요. 숫자나 '나머지'로 적어 주세요.`};
+      if(!(v>0)) return {error:`"${t}"는 치수로 읽을 수 없어요. 숫자나 '자투리'로 적어 주세요.`};
       out.push(v);
     }
     if(!out.length) return {error:"나눌 치수를 적어 주세요."};
-    if(out.filter(v=>v===null).length>1) return {error:"한 띠 안에 '나머지'는 한 번만 쓸 수 있어요."};
+    if(out.filter(v=>v===null).length>1) return {error:"한 줄 안에 '자투리'는 한 번만 쓸 수 있어요."};
     return {sizes:out};
   }
 
@@ -1800,7 +1816,7 @@
     let rest=0;
     if(hasRest){
       rest=r1p(total-fixed-(n-1)*kerf);
-      if(!(rest>0)) return {error:`치수 합이 ${total.toLocaleString()}mm를 넘어서 '나머지'가 남지 않아요.`};
+      if(!(rest>0)) return {error:`치수 합이 ${total.toLocaleString()}mm를 넘어서 '자투리'가 남지 않아요.`};
     }else if(fixed+(n-1)*kerf>total+0.001){
       return {error:`치수 합(톱날 포함)이 ${total.toLocaleString()}mm를 넘어요.`};
     }
@@ -1824,9 +1840,9 @@
       const rep=Math.max(1,Math.floor(Number(s.rep)||1));
       for(let k=0;k<rep;k++){ stripSizes.push(s.rest?null:Number(s.size)); stripDefs.push(s); }
     });
-    if(!stripSizes.length) return {error:"띠를 하나 이상 넣어 주세요."};
-    if(stripSizes.filter(v=>v===null).length>1) return {error:"'나머지' 띠는 하나만 둘 수 있어요."};
-    if(stripSizes.some(v=>v!==null && !(v>0))) return {error:"띠 폭을 숫자로 넣어 주세요."};
+    if(!stripSizes.length) return {error:"1차 재단 폭을 하나 이상 넣어 주세요."};
+    if(stripSizes.filter(v=>v===null).length>1) return {error:"'자투리'는 1차 재단에서 하나만 둘 수 있어요."};
+    if(stripSizes.some(v=>v!==null && !(v>0))) return {error:"1차 재단 폭을 숫자로 넣어 주세요."};
     const main=layoutLine(stripSizes,mainTotal,kerf);
     if(main.error) return {error:main.error};
 
@@ -1840,17 +1856,17 @@
       let sizes;
       if(sd.split==="list"){
         const p=parseSplitList(sd.list);
-        if(p.error) return {error:`띠 ${i+1}: ${p.error}`};
+        if(p.error) return {error:`${i+1}번: ${p.error}`};
         sizes=p.sizes;
       }else if(sd.split==="div"){
         const n=Math.floor(Number(sd.n));
-        if(!(n>=2)) return {error:`띠 ${i+1}: 등분 수는 2 이상으로 넣어 주세요.`};
+        if(!(n>=2)) return {error:`${i+1}번: 등분 수는 2 이상으로 넣어 주세요.`};
         sizes=Array.from({length:n},()=>r1p((crossTotal-(n-1)*kerf)/n));
       }else{
         sizes=[crossTotal];
       }
       const line=layoutLine(sizes,crossTotal,kerf);
-      if(line.error) return {error:`띠 ${i+1}: ${line.error}`};
+      if(line.error) return {error:`${i+1}번: ${line.error}`};
       line.segs.forEach(c=>pieces.push(rect(seg.pos,seg.size,c.pos,c.size)));
       if(line.scrap>0){
         const c0=r1p(line.end);
@@ -1919,7 +1935,7 @@
     document.querySelectorAll(".pat-dir-btn").forEach(x=>x.classList.toggle("active",x.dataset.dir===patDir));
   }
   const numOr=(v)=>{ const n=Number(v); return Number.isFinite(n)&&n>0?Math.round(n*10)/10:null; };
-  let aiParts=[], aiQuestions=[];
+  let aiParts=[], aiQuestions=[], aiPrefBoard=null;
   function aiFillPattern(r){
     const strips=(Array.isArray(r.strips)?r.strips:[]).map(t=>{
       const rest=!!t.rest || t.size==null;
@@ -1934,16 +1950,42 @@
     if(inputKind!=="pat") setInputKind("pat"); else renderPatStrips();
     return strips.filter(s=>s.warn).length;
   }
+  // 계산과 같은 규칙: 원장과 같은 변은 그대로, 더 짧으면 여유분(가장자리)만큼 빼고 비교
+  function fitsBoard(a,b,bd){
+    const L=Math.max(a,b), S=Math.min(a,b), tr=Number(getEdgeTrimMM())||0;
+    const ok=(len,side)=>len===side || len<=side-tr;
+    return (ok(L,bd.h)&&ok(S,bd.w)) || (L<=bd.w&&ok(L,bd.w)&&ok(S,bd.h));
+  }
+  function pickBoard(a,b,pref){
+    if(!(a>0&&b>0)) return null;
+    const list=boardSizesOf().slice().sort((x,y)=>x.w*x.h-y.w*y.h);
+    if(pref && fitsBoard(a,b,pref)) return {w:pref.w,h:pref.h};
+    const f=list.find(bd=>fitsBoard(a,b,bd)); return f?{w:f.w,h:f.h}:null;
+  }
+  const bkey=bd=>bd?`${bd.w}x${bd.h}`:"";
   function renderAiParts(){
     if(!aiParts.length) return "";
+    const list=boardSizesOf();
+    const tCount={}; aiParts.forEach(p=>{ const k=(Number(p.t)||"?")+"T"; tCount[k]=(tCount[k]||0)+1; });
+    const tKeys=Object.keys(tCount);
+    const bad=aiParts.filter(p=>!p.board).length;
     return `<div class="ai-parts">
       <div class="ai-parts-head"><b>읽은 부품 ${aiParts.length}개</b><span>틀린 숫자는 여기서 바로 고치세요</span></div>
-      ${aiParts.map((p,k)=>`<div class="ai-prow${p.unclear?" pat-warn":""}" data-k="${k}">
+      ${tKeys.length>1?`<div class="ai-tsum">두께별: ${tKeys.map(k=>`<b>${escapeText(k)}</b> ${tCount[k]}개`).join(" · ")}</div>`:""}
+      ${bad?`<div class="ai-badmsg">⛔ 등록된 원장보다 큰 부품이 ${bad}개 있어요. 원장을 고르거나, 설정 → 취급하는 원장에 크기를 추가해 주세요.</div>`:""}
+      ${aiParts.map((p,k)=>`<div class="ai-prow${p.unclear?" pat-warn":""}${!p.board?" ai-bad":""}" data-k="${k}">
         <input class="input" data-f="a" type="number" inputmode="decimal" value="${p.a??""}" aria-label="치수1">
         <span>×</span><input class="input" data-f="b" type="number" inputmode="decimal" value="${p.b??""}" aria-label="치수2">
         <span>×</span><input class="input ai-q" data-f="qty" type="number" inputmode="numeric" value="${p.qty??1}" aria-label="수량"><span>개</span>
         <button type="button" class="pat-del" data-del="${k}" aria-label="빼기">✕</button>
-        ${p.note||p.unclear?`<div class="ai-pnote">${p.unclear?"⚠ 확실하지 않아요. ":""}${escapeText(p.note||"")}</div>`:""}
+        <div class="ai-prow2">
+          <label class="ai-t"><input class="input" data-f="t" type="number" inputmode="decimal" value="${p.t??""}" aria-label="두께"><span>T</span></label>
+          <select class="input ai-board" data-f="board" aria-label="원장">
+            ${p.board?"":`<option value="" selected>맞는 원장 없음</option>`}
+            ${list.map(bd=>`<option value="${bkey(bd)}"${p.board&&bkey(p.board)===bkey(bd)?" selected":""}${fitsBoard(Number(p.a),Number(p.b),bd)?"":" disabled"}>${bd.w}×${bd.h}</option>`).join("")}
+          </select>
+          ${p.note||p.unclear?`<span class="ai-pnote">${p.unclear?"⚠ 확실하지 않아요. ":""}${escapeText(p.note||"")}</span>`:""}
+        </div>
       </div>`).join("")}
       <button type="button" class="btn btn-primary ai-addall" id="aiAddAll">부품 ${aiParts.length}개 모두 추가</button>
     </div>`;
@@ -1961,6 +2003,15 @@
     box.querySelectorAll(".ai-prow input").forEach(inp=>inp.addEventListener("input",()=>{
       const k=Number(inp.closest(".ai-prow").dataset.k); aiParts[k][inp.dataset.f]=inp.value;
       if(aiParts[k].unclear){ aiParts[k].unclear=false; inp.closest(".ai-prow").classList.remove("pat-warn"); }
+    }));
+    box.querySelectorAll(".ai-prow input[data-f=a],.ai-prow input[data-f=b]").forEach(inp=>inp.addEventListener("change",()=>{
+      const p=aiParts[Number(inp.closest(".ai-prow").dataset.k)];
+      if(!(p.board&&fitsBoard(Number(p.a),Number(p.b),p.board))) p.board=pickBoard(Number(p.a),Number(p.b),aiPrefBoard);
+      redrawAiBox();
+    }));
+    box.querySelectorAll(".ai-board").forEach(sel=>sel.addEventListener("change",()=>{
+      const p=aiParts[Number(sel.closest(".ai-prow").dataset.k)];
+      const n=(sel.value.match(/\d+/g)||[]).map(Number); p.board=n.length===2?{w:n[0],h:n[1]}:null; redrawAiBox();
     }));
     box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{ aiParts.splice(Number(b.dataset.del),1); redrawAiBox(); }));
     $("aiAddAll")?.addEventListener("click",addAiParts);
@@ -1982,7 +2033,9 @@
     const ok=[], bad=[];
     aiParts.forEach((p,k)=>{ const a=Number(p.a), b=Number(p.b), q=Math.floor(Number(p.qty)); (a>0&&b>0&&q>0?ok:bad).push(k); });
     if(bad.length){ toast(`${bad.map(k=>k+1).join(", ")}번째 줄의 치수나 수량을 확인해 주세요.`); return; }
-    aiParts.forEach(p=>parts.push({ w:Number(p.a), h:Number(p.b), qty:Math.floor(Number(p.qty)), rotate:true, boardW, boardH, boardT, kerf, edgeTrim:getEdgeTrimMM(), mode:calcMode }));
+    const noBoard=aiParts.map((p,k)=>p.board&&fitsBoard(Number(p.a),Number(p.b),p.board)?null:k+1).filter(Boolean);
+    if(noBoard.length){ toast(`${noBoard.join(", ")}번째 부품은 맞는 원장이 없어요. 원장을 고르거나 빼 주세요.`); return; }
+    aiParts.forEach(p=>parts.push({ w:Number(p.a), h:Number(p.b), qty:Math.floor(Number(p.qty)), rotate:true, boardW:p.board.w, boardH:p.board.h, boardT:Number(p.t)>0?Number(p.t):boardT, kerf, edgeTrim:getEdgeTrimMM(), mode:calcMode }));
     const n=aiParts.length; aiParts=[];
     renderParts(); resetResult();
     aiHead=`<b>✓ 부품 ${n}개를 추가했어요.</b> 아래 <b>최적화 계산</b>을 누르면 원장 장수와 재단비가 나와요.`; aiKind="ok";
@@ -1990,16 +2043,28 @@
     toast(`부품 ${n}개를 추가했어요.`);
   }
   function applyAiDrawing(r,timing){
-    aiParts=(Array.isArray(r.parts)?r.parts:[]).map(p=>({a:numOr(p.a), b:numOr(p.b), qty:Math.max(1,Math.floor(Number(p.qty)||1)), note:String(p.note||"").slice(0,60), unclear:!!p.unclear})).filter(p=>p.a||p.b);
+    const aiQuestions_extra=[];
+    const bw0=Number($("boardW").value), bh0=Number($("boardH").value);
+    const dwb=numOr(r.board&&r.board.short), dhb=numOr(r.board&&r.board.long);
+    aiPrefBoard=dwb&&dhb?{w:dwb,h:dhb}:(bw0>0&&bh0>0?{w:Math.min(bw0,bh0),h:Math.max(bw0,bh0)}:null);
+    aiParts=(Array.isArray(r.parts)?r.parts:[]).map(p=>({a:numOr(p.a), b:numOr(p.b), qty:Math.max(1,Math.floor(Number(p.qty)||1)), t:numOr(p.t), note:String(p.note||"").slice(0,60), unclear:!!p.unclear})).filter(p=>p.a||p.b);
+    aiParts.forEach(p=>{ p.board=pickBoard(p.a,p.b,aiPrefBoard); });
+    // 등록된 원장 어디에도 안 들어가는 부품은 손님 질문으로
+    aiParts.filter(p=>!p.board).forEach(p=>{ const q=`${p.a}×${p.b} 부품은 가지고 있는 원장(여유분 포함)보다 커서 한 장으로 나오지 않는데, 어떻게 진행할까요?`; if(!aiQuestions.includes(q)) aiQuestions_extra.push(q); });
     aiQuestions=(Array.isArray(r.questions)?r.questions:[]).map(q=>String(q||"").trim()).filter(Boolean).slice(0,8);
+    aiQuestions=aiQuestions.concat(aiQuestions_extra).slice(0,8);
     const notes=[];
     // 두께
-    const t=numOr(r.thickness), curT=Number($("boardT").value);
+    const tSet=[...new Set(aiParts.map(p=>p.t).filter(Boolean))];
+    const t=tSet.length>1?null:(tSet[0]||numOr(r.thickness)), curT=Number($("boardT").value);
+    if(tSet.length>1) notes.push(`두께가 ${tSet.length}가지예요 (${tSet.map(x=>x+"T").join(", ")}). 부품마다 그 두께로 따로 계산해요.`);
+    const mixedB=[...new Set(aiParts.filter(p=>p.board).map(p=>bkey(p.board)))];
+    if(mixedB.length>1) notes.push(`원장 크기도 부품에 따라 나눠 넣었어요 (${mixedB.map(x=>x.replace("x","×")).join(", ")}).`);
     if(t && t!==curT){ $("boardT").value=String(t); $("boardT").dispatchEvent(new Event("input",{bubbles:true})); notes.push(`도면 두께에 맞춰 두께를 ${t}mm로 바꿨어요.`); }
     if(r.material) notes.push(`자재: ${r.material}`);
     const bw=Number($("boardW").value), bh=Number($("boardH").value);
     const dw=numOr(r.board&&r.board.short), dh=numOr(r.board&&r.board.long);
-    if(dw&&dh&&(dw!==bw||dh!==bh)) notes.push(`도면에는 원장 ${dw}×${dh}로 적혀 있어요. 위 원장 크기(${bw||"?"}×${bh||"?"})를 확인해 주세요.`);
+    if(dw&&dh&&(dw!==bw||dh!==bh)) notes.push(`도면에 원장 ${dw}×${dh}로 적혀 있어서 그 원장 기준으로 넣었어요.`);
     let warnN=0, filled="";
     if(r.kind==="pattern" || (!aiParts.length && Array.isArray(r.strips) && r.strips.length)){
       warnN=aiFillPattern(r);
@@ -2013,7 +2078,7 @@
       if(!aiQuestions.length) aiQuestions=["도면 치수를 글자로 한 번 더 보내주실 수 있을까요? (예: 600×400 2개)"];
     }else{
       aiHead=filled==="pattern"
-        ? `<b>✓ 재단 패턴을 읽었어요.</b> <b>도면대로</b> 칸이 도면과 같은지 확인하고 <b>추가</b>를 눌러 주세요.`
+        ? `<b>✓ 재단 패턴을 읽었어요.</b> <b>모양대로</b> 칸이 도면과 같은지 확인하고 <b>추가</b>를 눌러 주세요.`
         : `<b>✓ 도면을 읽었어요.</b> 아래 부품이 도면과 같은지 확인하고 <b>모두 추가</b>를 눌러 주세요.`;
       if(warnN) aiHead+=`<br>⚠ 노란 줄 ${warnN}개는 AI가 확실히 못 읽은 부분이에요.`;
       aiKind=warnN||aiQuestions.length?"warn":"ok";
@@ -2054,7 +2119,7 @@
         const pr=window.jnAiParse?window.jnAiParse(txt):{parts:[],strips:[]};
         const found=pr.parts, strips=pr.strips.length;
         if(found.length) live=`<div class="ai-live"><b>부품 ${found.length}개 읽음</b>${found.slice(-4).map(p=>`<span>${escapeText(String(p.a))} × ${escapeText(String(p.b))} × ${escapeText(String(p.qty??1))}</span>`).join("")}</div>`;
-        else if(strips) live=`<div class="ai-live"><b>띠 ${strips}개 읽음</b></div>`;
+        else if(strips) live=`<div class="ai-live"><b>1차 재단 ${strips}개 읽음</b></div>`;
         else live=`<div class="ai-live"><b>답을 받는 중…</b></div>`;
         draw();
       };
@@ -2084,21 +2149,21 @@
     box.innerHTML=patStrips.map((s,i)=>`
       <div class="pat-strip${s.warn?" pat-warn":""}" data-i="${i}">${s.warn?`<div class="pat-warn-msg">⚠ AI가 확실히 못 읽었어요. 도면과 비교해 확인해 주세요.</div>`:""}
         <div class="pat-row">
-          <span class="pat-no">띠 ${i+1}</span>
-          <input class="input pat-size" type="number" inputmode="decimal" min="1" placeholder="폭 mm" value="${s.rest?"":escapeText(String(s.size??""))}" ${s.rest?"disabled":""} aria-label="띠 ${i+1} 폭">
-          <button type="button" class="pat-rest${s.rest?" on":""}" aria-pressed="${s.rest}">나머지</button>
+          <span class="pat-no">${i+1}번</span>
+          <input class="input pat-size" type="number" inputmode="decimal" min="1" placeholder="1차 폭 mm" value="${s.rest?"":escapeText(String(s.size??""))}" ${s.rest?"disabled":""} aria-label="${i+1}번 폭">
+          <button type="button" class="pat-rest${s.rest?" on":""}" aria-pressed="${s.rest}">자투리</button>
           <span class="pat-x">×</span>
-          <input class="input pat-rep" type="number" inputmode="numeric" min="1" step="1" value="${s.rep||1}" aria-label="띠 ${i+1} 반복 개수">
-          <button type="button" class="pat-del" aria-label="띠 ${i+1} 삭제" ${patStrips.length<2?"disabled":""}>✕</button>
+          <input class="input pat-rep" type="number" inputmode="numeric" min="1" step="1" value="${s.rep||1}" aria-label="${i+1}번 반복 개수">
+          <button type="button" class="pat-del" aria-label="${i+1}번 삭제" ${patStrips.length<2?"disabled":""}>✕</button>
         </div>
         <div class="pat-row pat-row2">
-          <select class="input pat-split" aria-label="띠 ${i+1} 나누기">
+          <select class="input pat-split" aria-label="${i+1}번 나누기">
             <option value="none" ${s.split==="none"?"selected":""}>그대로</option>
             <option value="list" ${s.split==="list"?"selected":""}>치수로 나누기</option>
             <option value="div" ${s.split==="div"?"selected":""}>등분하기</option>
           </select>
-          <input class="input pat-list" type="text" placeholder="예: 1090, 나머지" value="${escapeText(s.list||"")}" ${s.split==="list"?"":"hidden"} aria-label="띠 ${i+1} 나눌 치수">
-          <span class="pat-div" ${s.split==="div"?"":"hidden"}><input class="input pat-n" type="number" inputmode="numeric" min="2" step="1" value="${s.n||2}" aria-label="띠 ${i+1} 등분 수"><span>등분</span></span>
+          <input class="input pat-list" type="text" placeholder="예: 1090, 자투리" value="${escapeText(s.list||"")}" ${s.split==="list"?"":"hidden"} aria-label="${i+1}번 나눌 치수">
+          <span class="pat-div" ${s.split==="div"?"":"hidden"}><input class="input pat-n" type="number" inputmode="numeric" min="2" step="1" value="${s.n||2}" aria-label="${i+1}번 등분 수"><span>등분</span></span>
         </div>
       </div>`).join("");
     box.querySelectorAll(".pat-strip").forEach(row=>{
@@ -2121,7 +2186,7 @@
     const box=$("patPreview");
     if(!(bw>0&&bh>0)){ box.innerHTML=""; return; }
     const ready=patStrips.some(s=>s.rest||Number(s.size)>0);
-    if(!ready){ box.innerHTML=`<div class="pat-msg">띠 폭을 넣으면 미리보기가 그려져요.</div>`; return; }
+    if(!ready){ box.innerHTML=`<div class="pat-msg">1차 재단 폭을 넣으면 미리보기가 그려져요.</div>`; return; }
     const plan=buildPatternPlan(readPatDef(),bw,bh,kerf);
     if(plan.error){ box.innerHTML=`<div class="pat-msg err">${escapeText(plan.error)}</div>`; return; }
     const B=Math.max(1,Math.floor(Number($("patBoards").value)||1));
@@ -2158,11 +2223,11 @@
     renderPatStrips();
     renderParts();
     resetResult();
-    toast("도면대로 부품을 추가했습니다.");
+    toast("모양대로 부품을 추가했습니다.");
   }
 
   function partTitle(p){
-    if(p.pat) return `도면대로 (${p.patText})`;
+    if(p.pat) return `모양대로 (${p.patText})`;
     if(p.div) return `${divLabel(p)} (약 ${p.w.toLocaleString()}×${p.h.toLocaleString()}mm)`;
     return `${p.w.toLocaleString()}×${p.h.toLocaleString()}mm`;
   }
@@ -3914,7 +3979,7 @@
     new MutationObserver(()=>{
       if(open && parts.length>prevCount){
         const i=parts.length-1, p=parts[i];
-        const what=p.pat ? `도면대로 ${p.patPer}조각` : p.div ? divLabel(p) : `${p.w.toLocaleString()} × ${p.h.toLocaleString()}`;
+        const what=p.pat ? `모양대로 ${p.patPer}조각` : p.div ? divLabel(p) : `${p.w.toLocaleString()} × ${p.h.toLocaleString()}`;
         const qty=p.pat ? `${p.patBoards.toLocaleString()}장` : p.div ? `${divBoardsOf(p).toLocaleString()}장` : `${p.qty.toLocaleString()}${calcMode==="reverse"?"장":"개"}`;
         $("psLast").innerHTML=`<span class="code-chip c${i%4}">${codeFor(i)}</span><span>${escapeText(what)} <b>${qty}</b> 추가됨</span><span class="ps-total">목록 ${parts.length}개</span>`;
       }
@@ -4190,7 +4255,7 @@
 자재: 적힌 그대로 (예: 18T UV)
 두께: 숫자
 원장: 짧은변 x 긴변
-부품: 가로 x 세로 x 수량 | 메모 | ?
+부품: 가로 x 세로 x 수량 | 두께 | 메모 | ?
 띠방향: 긴변 또는 짧은변
 띠: 폭 x 반복 | 나누기 | ?
 장수: 숫자
@@ -4199,12 +4264,14 @@
 
 규칙:
 - 부품 치수 목록(가로×세로×수량)이 있으면 종류는 부품목록. 부품 하나당 "부품:" 한 줄. 수량이 없으면 1. 확실하지 않은 줄은 맨 끝에 ? 를 붙여.
-  예) 부품: 50 x 575 x 4 | 수량 고쳐 씀 | ?
-  예) 부품: 680 x 830 x 1 | 문짝 |
-- 부품 목록 없이 원장을 띠로 자르는 그림이면 종류는 재단패턴. 띠 폭이 긴 변(2440 쪽)을 따라 나열돼 있으면 띠방향: 긴변. 띠마다 "띠:" 한 줄. 같은 띠가 연달아 있으면 반복 개수로 묶어. 치수 없이 남는 띠는 폭에 "나머지".
-  나누기는 안 자르면 "그대로", 치수가 적혀 있으면 "1090, 나머지"처럼, 같은 크기 N개면 "N등분".
+- 두께는 부품마다 다를 수 있어. 부품 줄마다 그 부품의 두께를 꼭 써 (예: 18T, 30T). 두께가 적힌 칸·줄 아래의 부품은 그 두께야. 양면·UV 같은 자재 설명은 메모에 써.
+  예) 부품: 50 x 575 x 4 | 18T | UV, 수량 고쳐 씀 | ?
+  예) 부품: 680 x 830 x 1 | 18T | 문짝 |
+  예) 부품: 260 x 1160 x 6 | 20T | 양면 |
+- 부품 목록 없이 원장을 띠로 자르는 그림이면 종류는 재단패턴. 띠 폭이 긴 변(2440 쪽)을 따라 나열돼 있으면 띠방향: 긴변. 띠마다 "띠:" 한 줄. 같은 띠가 연달아 있으면 반복 개수로 묶어. 치수 없이 남는 띠는 폭에 "자투리".
+  나누기는 안 자르면 "그대로", 치수가 적혀 있으면 "1090, 자투리"처럼, 같은 크기 N개면 "N등분".
   예) 띠: 590 x 3 | 그대로 |
-  예) 띠: 나머지 x 1 | 590, 590, 나머지 |
+  예) 띠: 자투리 x 1 | 590, 590, 자투리 |
 - 원장 크기, 두께, 장수는 도면에 적혀 있을 때만 써.
 - 고쳐 쓴 숫자나 흐린 숫자는 가장 그럴듯한 값을 쓰고 ? 를 붙인 뒤, "질문:" 줄로 확인 질문을 써.
 - 질문은 견적 전에 꼭 물어야 할 것만, 존댓말 한 문장씩, 최대 5개. 도면에 이미 있는 건 묻지 마.
@@ -4213,13 +4280,16 @@
     function parseAiText(txt){
       const r={kind:"",material:"",thickness:null,board:{short:null,long:null},parts:[],strip_side:"long",strips:[],pattern_boards:null,notes:[],questions:[]};
       const nums=t=>(String(t).replace(/,(?=\d{3}\b)/g,"").match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+      const tOf=t=>{ const m=String(t).match(/(\d+(?:\.\d+)?)\s*(?:T|t|mm|㎜)(?![a-zA-Z])/); return m?Number(m[1]):null; };
+      let curT=null, curMat="";
       String(txt||"").split(/\r?\n/).forEach(raw=>{
         const line=raw.replace(/\*\*/g,"").replace(/^[\s\-*•·>]+/,"").trim();
         const m=line.match(/^([^:：]{1,8})[:：]\s*(.*)$/);
         if(!m){
           // 형식을 안 지키고 "50 × 575 × 4 EA (문짝)"처럼 써도 부품으로 읽음
           const d=line.match(/(\d+(?:\.\d+)?)\s*[x×X*]\s*(\d+(?:\.\d+)?)(?:\s*[x×X*\-]\s*(\d+)\s*(?:EA|ea|개|장|매)?)?/);
-          if(d){ const note=(line.match(/[(（]([^)）]{1,30})[)）]/)||[])[1]||""; r.parts.push({a:Number(d[1]),b:Number(d[2]),qty:Number(d[3])||1,note:note.replace(/^메모\s*[:：]\s*/,""),unclear:/\?\s*$/.test(line)}); }
+          if(d){ const note=(line.match(/[(（]([^)）]{1,30})[)）]/)||[])[1]||""; r.parts.push({a:Number(d[1]),b:Number(d[2]),qty:Number(d[3])||1,t:curT,note:note.replace(/^메모\s*[:：]\s*/,""),unclear:/\?\s*$/.test(line)}); }
+          else { const t=tOf(line); if(t){ curT=t; curMat=line.slice(0,30); } }   // "30T 양면" 같은 칸 제목
           return;
         }
         const key=m[1].replace(/\s/g,""), val=m[2].trim();
@@ -4227,15 +4297,20 @@
         const unclear=/\?\s*$/.test(val)||segs.slice(1).some(x=>x==="?");
         if(key==="종류") r.kind=/패턴/.test(val)?"pattern":"parts";
         else if(key.includes("자재")||key.includes("두께")){
-          if(key.includes("자재")) r.material=val.slice(0,40);
-          const t=(val.match(/(\d+(?:\.\d+)?)\s*T\b/i)||[])[1]||(key.includes("두께")?nums(val)[0]:null);
-          if(t) r.thickness=Number(t);
+          if(key.includes("자재")&&!r.material) r.material=val.slice(0,40);
+          const t=tOf(val)||(key.includes("두께")?nums(val)[0]:null);
+          if(t){ if(!r.thickness) r.thickness=Number(t); curT=Number(t); }
         }
         else if(key==="원장"){ const n=nums(val); if(n.length>=2){ r.board={short:Math.min(n[0],n[1]),long:Math.max(n[0],n[1])}; } }
-        else if(key==="부품"){ const n=nums(segs[0]); if(n.length>=2) r.parts.push({a:n[0],b:n[1],qty:n[2]||1,note:(segs[1]&&segs[1]!=="?"?segs[1]:"").slice(0,60),unclear}); }
+        else if(key==="부품"){
+          const n=nums(segs[0]); if(n.length<2) return;
+          let t=null; const notes=[];
+          segs.slice(1).forEach(x=>{ if(!x||x==="?") return; const tt=/^\d+(?:\.\d+)?\s*(?:T|t|mm|㎜)?$/.test(x)?nums(x)[0]:(tOf(x)&&x.length<=12?tOf(x):null); if(tt&&!t) t=tt; else notes.push(x.replace(/\?$/,"").trim()); });
+          r.parts.push({a:n[0],b:n[1],qty:n[2]||1,t:t||curT,note:notes.filter(Boolean).join(", ").slice(0,60),unclear});
+        }
         else if(key==="띠방향") r.strip_side=/짧/.test(val)?"short":"long";
         else if(key==="띠"){
-          const rest=/나머지/.test(segs[0]); const n=nums(segs[0]);
+          const rest=/나머지|자투리/.test(segs[0]); const n=nums(segs[0]);
           const size=rest?null:(n[0]||null), repeat=rest?(n[0]||1):(n[1]||1);
           const sp=(segs[1]||"").replace(/\?/g,"").trim();
           let split="none", list="", dn=2;
@@ -4249,6 +4324,8 @@
         else if(key==="질문"){ if(val) r.questions.push(val.slice(0,120)); }
       });
       if(!r.kind) r.kind=r.parts.length?"parts":(r.strips.length?"pattern":"");
+      // 두께가 하나만 적혀 있으면 두께 없는 부품에도 그 두께
+      if(r.thickness) r.parts.forEach(p=>{ if(!p.t) p.t=r.thickness; });
       return r;
     }
     window.jnAiParse=parseAiText;
@@ -6077,7 +6154,14 @@
   .ai-prow .input{-moz-appearance:textfield}
   .ai-prow > span{font-size:12.5px;color:var(--ink-mute)}
   .ai-prow .pat-del{height:36px}
-  .ai-pnote{flex-basis:100%;font-size:12px;font-weight:700;color:#6B4E00;padding-left:2px}
+  .ai-pnote{font-size:12px;font-weight:700;color:#6B4E00;padding-left:2px;flex:1 1 100%}
+  .ai-prow2{flex-basis:100%;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .ai-t{display:flex;align-items:center;gap:3px;font-size:12.5px;font-weight:700;color:var(--ink-soft)}
+  .ai-prow .ai-t .input{flex:0 0 52px;width:52px;text-align:center;padding:4px}
+  .ai-prow .input.ai-board{flex:0 1 150px;width:150px;height:36px;padding:0 26px 0 10px!important;line-height:36px!important;font-size:14px!important;-webkit-appearance:none;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-soft) 50%),linear-gradient(135deg,var(--ink-soft) 50%,transparent 50%);background-position:calc(100% - 14px) 16px,calc(100% - 9px) 16px;background-size:5px 5px;background-repeat:no-repeat}
+  .ai-prow.ai-bad{background:#FDECEC;border-color:#F3A5A5}
+  .ai-badmsg{font-size:12.5px;font-weight:700;color:var(--danger);background:#FDECEC;border-radius:8px;padding:6px 8px}
+  .ai-tsum{font-size:12.5px;color:var(--ink-soft)}
   .ai-addall{width:100%;height:44px;margin-top:4px}
   .ai-qs{margin-top:10px;background:#fff;border-radius:12px;padding:10px 12px;color:var(--ink)}
   .ai-qs-head{display:flex;justify-content:space-between;align-items:center}
