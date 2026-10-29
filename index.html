@@ -4125,6 +4125,8 @@
   $("addPartBtn").addEventListener("click",addPart);
   $("langBtn").textContent=(window.JN_LANG==="en")?"KO":"EN";
   $("langBtn").addEventListener("click",()=>window.jnSetLang(window.JN_LANG==="en"?"ko":"en"));
+  // 설정에서 언어를 누르면 바로 저장하고 바뀜 (같이 고친 설정도 함께 저장)
+  document.querySelectorAll('input[name="setLang"]').forEach(r=>r.addEventListener("change",()=>{ if(r.checked&&r.value!==(window.JN_LANG||"ko")) $("settingsSave").click(); }));
   $("copyOrderBtn").addEventListener("click",async()=>{
     const t=orderText(); if(!t){ toast("먼저 최적화 계산을 해 주세요."); return; }
     const site=$("siteName").value.trim(); const full=(site?`[${site}]\n`:"")+t;
