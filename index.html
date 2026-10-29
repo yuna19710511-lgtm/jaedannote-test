@@ -899,6 +899,16 @@
           </table>
         </div>
         <button class="text-danger" id="clearBtn" type="button">부품 전체 삭제</button>
+        <div class="ai-edit" id="aiEdit">
+          <div class="ai-edit-head"><b>💬 말로 고치기</b><span class="pat-ai-tag">AI</span></div>
+          <form class="ai-edit-row" id="aiEditForm" autocomplete="off">
+            <input class="input" id="aiEditInput" type="text" enterkeyhint="send" placeholder="예: B 수량 8개로 · 여유분 10으로 · 30T는 전부 4×10">
+            <button class="btn btn-primary" id="aiEditSend" type="submit">보내기</button>
+          </form>
+          <div class="ai-edit-out" id="aiEditOut" hidden></div>
+          <button type="button" class="ai-undo" id="aiUndo" hidden>↩ 방금 고친 것 되돌리기</button>
+          <p class="ai-edit-hint">폰에서는 키보드의 🎤 마이크로 말해도 돼요.</p>
+        </div>
       </section>
 
       <div class="calc-dock">
@@ -2143,6 +2153,143 @@
     $("patAiFile").value=""; $("patAiFile").click();
   }
   $("patAiBtn").addEventListener("click",startAiScan);
+
+  // ===== v99: 말로 고치기 =====
+  let aiEditPlan=null, aiUndoSnap=null, aiEditBusy=false;
+  const editOut=(html,kind)=>{ const el=$("aiEditOut"); if(!html){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false; el.className="ai-edit-out"+(kind?" "+kind:""); el.innerHTML=html; };
+  function findBoardByName(v){
+    const t=String(v||"").replace(/\s/g,"").replace(/[xX*]/g,"×");
+    const list=boardSizesOf();
+    let b=list.find(x=>boardName(x.w,x.h)===t);
+    if(b) return {w:b.w,h:b.h};
+    const n=(t.match(/\d+/g)||[]).map(Number);
+    if(n.length>=2){ if(n[0]<20&&n[1]<20){ b=list.find(x=>boardName(x.w,x.h)===`${n[0]}×${n[1]}`); return b?{w:b.w,h:b.h}:null; }
+      return {w:Math.min(n[0],n[1]),h:Math.max(n[0],n[1])}; }
+    return null;
+  }
+  function editContext(){
+    const lines=parts.map((p,i)=>{
+      const kind=p.pat?"모양대로":p.div?"등분":"부품";
+      const size=p.pat?escapeText(p.patText||""):p.div?divLabel(p):`${p.w} x ${p.h}`;
+      return `${codeFor(i)}: ${kind} ${size} x ${p.pat?p.patBoards+"장":p.div?divBoardsOf(p)+"장":p.qty+"개"} | ${p.boardT}T | ${boardName(p.boardW,p.boardH)}${p.note?" | "+p.note:""}`;
+    });
+    return `현재 부품:\n${lines.join("\n")||"(없음)"}\n기본 설정: 원장 ${$("boardW").value}x${$("boardH").value}, 두께 ${$("boardT").value}T, 톱날 ${$("kerfInput").value}, 여유분 ${getEdgeTrimMM()}\n취급 원장: ${boardSizesOf().map(b=>`${boardName(b.w,b.h)}(${b.w}x${b.h})`).join(", ")}`;
+  }
+  // AI 답(줄) → 바꿀 목록. 앱이 직접 확인해서 안 되는 건 빼고 이유를 남김
+  function buildEditPlan(cmds){
+    const codeIdx=new Map(parts.map((p,i)=>[codeFor(i),i]));
+    const ops=[], skip=[], asks=[];
+    const num=v=>{ const m=String(v).replace(/,/g,"").match(/-?\d+(?:\.\d+)?/); return m?Number(m[0]):NaN; };
+    cmds.forEach(c=>{
+      if(c.type==="ask"){ asks.push(c.text); return; }
+      if(c.type==="calc"){ ops.push({kind:"calc",label:"다시 계산"}); return; }
+      if(c.type==="set"){
+        const v=num(c.value), f=c.field;
+        if(/여유/.test(f)&&v>=0) ops.push({kind:"set",id:"edgeTrimInput",value:v,label:`여유분 ${getEdgeTrimMM()} → ${v}mm`});
+        else if(/톱/.test(f)&&v>=0) ops.push({kind:"set",id:"kerfInput",value:v,label:`톱날 두께 ${$("kerfInput").value} → ${v}mm`});
+        else if(/두께/.test(f)&&v>0) ops.push({kind:"set",id:"boardT",value:v,label:`새로 넣을 부품 기본 두께 ${$("boardT").value} → ${v}T`});
+        else if(/원장/.test(f)){ const b=findBoardByName(c.value); if(b) ops.push({kind:"setBoard",board:b,label:`새로 넣을 부품 기본 원장 → ${boardName(b.w,b.h)} (${b.w}×${b.h})`}); else skip.push(`원장 "${c.value}"를 알 수 없어요`); }
+        else skip.push(`"${f}" 설정은 바꿀 수 없어요`);
+        return;
+      }
+      if(c.type==="add"){
+        const n=(String(c.size).match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+        if(n.length<2||!(n[0]>0&&n[1]>0)){ skip.push(`추가할 치수를 알 수 없어요 (${c.size})`); return; }
+        const qty=Math.max(1,Math.floor(n[2]||1)), t=num(c.t)>0?num(c.t):Number($("boardT").value);
+        let b=c.board?findBoardByName(c.board):null;
+        if(!b){ const pref={w:Math.min(Number($("boardW").value),Number($("boardH").value)),h:Math.max(Number($("boardW").value),Number($("boardH").value))}; b=pickBoard(n[0],n[1],pref); }
+        if(!b||!fitsBoard(n[0],n[1],b)){ skip.push(`${n[0]}×${n[1]}은 맞는 원장이 없어요`); return; }
+        ops.push({kind:"add",part:{w:n[0],h:n[1],qty,t,board:b,note:c.note||""},label:`추가: ${n[0]}×${n[1]} × ${qty}개 · ${t}T · ${boardName(b.w,b.h)}`});
+        return;
+      }
+      const i=codeIdx.get(String(c.code||"").toUpperCase().trim());
+      if(i===undefined){ skip.push(`"${c.code}" 부품을 찾지 못했어요`); return; }
+      const p=parts[i], code=codeFor(i);
+      if(c.type==="del"){ ops.push({kind:"del",i,label:`삭제: ${code} ${partTitle(p)}`}); return; }
+      if(c.type==="mod"){
+        const f=String(c.field||""), v=num(c.value);
+        if(/수량|개수|장수/.test(f)){
+          if(!(v>=1)){ skip.push(`${code} 수량 "${c.value}"`); return; }
+          if(p.pat){ ops.push({kind:"mod",i,patch:{patBoards:Math.floor(v),qty:calcMode==="reverse"?Math.floor(v):p.patPer*Math.floor(v)},label:`${code} 장수 ${p.patBoards} → ${Math.floor(v)}장`}); return; }
+          if(p.div){ skip.push(`${code}는 등분 부품이라 장수는 직접 고쳐 주세요`); return; }
+          ops.push({kind:"mod",i,patch:{qty:Math.floor(v)},label:`${code} ${p.w}×${p.h} 수량 ${p.qty} → ${Math.floor(v)}개`}); return;
+        }
+        if(/두께/.test(f)){ if(!(v>0)){ skip.push(`${code} 두께 "${c.value}"`); return; } ops.push({kind:"mod",i,patch:{boardT:v},label:`${code} 두께 ${p.boardT} → ${v}T`}); return; }
+        if(/원장/.test(f)){
+          const b=findBoardByName(c.value); if(!b){ skip.push(`원장 "${c.value}"를 알 수 없어요`); return; }
+          if(!p.pat&&!p.div&&!fitsBoard(p.w,p.h,b)){ skip.push(`${code} ${p.w}×${p.h}은 ${boardName(b.w,b.h)}에 안 들어가요`); return; }
+          if(p.pat||p.div){ skip.push(`${code}는 모양대로·등분 부품이라 원장은 직접 고쳐 주세요`); return; }
+          ops.push({kind:"mod",i,patch:{boardW:b.w,boardH:b.h},label:`${code} 원장 ${boardName(p.boardW,p.boardH)} → ${boardName(b.w,b.h)}`}); return;
+        }
+        if(/치수|가로|세로|크기/.test(f)){
+          if(p.pat||p.div){ skip.push(`${code}는 모양대로·등분 부품이라 치수는 직접 고쳐 주세요`); return; }
+          const n=(String(c.value).match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+          let w=p.w,h=p.h;
+          if(n.length>=2){ w=n[0]; h=n[1]; } else if(n.length===1){ if(/세로|2/.test(f)) h=n[0]; else w=n[0]; } else { skip.push(`${code} 치수 "${c.value}"`); return; }
+          if(!fitsBoard(w,h,{w:p.boardW,h:p.boardH})){ const b=pickBoard(w,h,null); if(!b){ skip.push(`${w}×${h}은 맞는 원장이 없어요`); return; } ops.push({kind:"mod",i,patch:{w,h,boardW:b.w,boardH:b.h},label:`${code} 치수 ${p.w}×${p.h} → ${w}×${h} (원장 ${boardName(b.w,b.h)})`}); return; }
+          ops.push({kind:"mod",i,patch:{w,h},label:`${code} 치수 ${p.w}×${p.h} → ${w}×${h}`}); return;
+        }
+        if(/메모/.test(f)){ ops.push({kind:"mod",i,patch:{note:String(c.value).slice(0,40)},label:`${code} 메모 → ${c.value}`}); return; }
+        skip.push(`${code}의 "${f}"는 바꿀 수 없어요`);
+      }
+    });
+    return {ops,skip,asks};
+  }
+  function showEditPlan(plan){
+    aiEditPlan=plan;
+    const real=plan.ops.filter(o=>o.kind!=="calc");
+    let html="";
+    if(real.length) html+=`<b>이렇게 바꿀까요?</b><ul>${real.map(o=>`<li>${escapeText(o.label)}</li>`).join("")}</ul>`;
+    if(plan.skip.length) html+=`<div class="ai-edit-skip">⚠ 못 바꾸는 것: ${plan.skip.map(escapeText).join(" · ")}</div>`;
+    if(plan.asks.length) html+=`<div class="ai-edit-ask">💬 ${plan.asks.map(escapeText).join(" ")}</div>`;
+    if(real.length) html+=`<div class="ai-edit-btns"><button type="button" class="btn btn-primary" id="aiEditApply">적용하고 다시 계산</button><button type="button" class="btn btn-outline" id="aiEditCancel">취소</button></div>`;
+    else if(!plan.asks.length&&!plan.skip.length) html+=`<div class="ai-edit-ask">💬 무엇을 바꿀지 알아듣지 못했어요. 예: "B 수량 8개로"</div>`;
+    editOut(html,real.length?"":"warn");
+    $("aiEditApply")?.addEventListener("click",applyEditPlan);
+    $("aiEditCancel")?.addEventListener("click",()=>{ aiEditPlan=null; editOut(""); });
+  }
+  function snapshot(){ return {parts:JSON.parse(JSON.stringify(parts)),vals:["boardW","boardH","boardT","kerfInput","edgeTrimInput"].map(id=>[id,$(id).value]),had:!!lastResult}; }
+  function applyEditPlan(){
+    const plan=aiEditPlan; if(!plan) return;
+    aiUndoSnap=snapshot();
+    const had=!!lastResult;
+    const dels=new Set(plan.ops.filter(o=>o.kind==="del").map(o=>o.i));
+    plan.ops.forEach(o=>{
+      if(o.kind==="mod") parts[o.i]={...parts[o.i],...o.patch};
+      else if(o.kind==="set"){ $(o.id).value=String(o.value); if(o.id==="kerfInput") parts=parts.map(p=>({...p,kerf:o.value})); if(o.id==="edgeTrimInput") parts=parts.map(p=>({...p,edgeTrim:o.value})); }
+      else if(o.kind==="setBoard"){ $("boardW").value=String(o.board.w); $("boardH").value=String(o.board.h); }
+    });
+    if(dels.size) parts=parts.filter((_,i)=>!dels.has(i));
+    plan.ops.filter(o=>o.kind==="add").forEach(o=>parts.push({w:o.part.w,h:o.part.h,qty:o.part.qty,rotate:true,boardW:o.part.board.w,boardH:o.part.board.h,boardT:o.part.t,kerf:Number($("kerfInput").value),edgeTrim:getEdgeTrimMM(),mode:calcMode,note:o.part.note}));
+    ["boardW","boardH","boardT","kerfInput","edgeTrimInput"].forEach(id=>$(id).dispatchEvent(new Event("input",{bubbles:true})));
+    aiEditPlan=null;
+    renderParts(); resetResult();
+    editOut(`<b>✓ 바꿨어요.</b> ${plan.ops.filter(o=>o.kind!=="calc").length}가지`,"ok");
+    $("aiUndo").hidden=false;
+    if(parts.length && (had || plan.ops.some(o=>o.kind==="calc"))) calculate();
+    toast("말한 대로 고쳤어요.");
+  }
+  $("aiUndo").addEventListener("click",()=>{
+    if(!aiUndoSnap) return;
+    parts=aiUndoSnap.parts; aiUndoSnap.vals.forEach(([id,v])=>{ $(id).value=v; $(id).dispatchEvent(new Event("input",{bubbles:true})); });
+    const had=aiUndoSnap.had; aiUndoSnap=null;
+    renderParts(); resetResult(); if(had&&parts.length) calculate();
+    $("aiUndo").hidden=true; editOut("↩ 되돌렸어요.","ok");
+  });
+  $("aiEditForm").addEventListener("submit",async e=>{
+    e.preventDefault();
+    const text=$("aiEditInput").value.trim(); if(!text||aiEditBusy) return;
+    if(window.jnCanEdit && !window.jnCanEdit()){ window.jnLicNotice && window.jnLicNotice(); return; }
+    if(!window.jnAiEdit){ toast("AI 기능을 불러오지 못했어요. 새로고침해 주세요."); return; }
+    aiEditBusy=true; $("aiEditSend").disabled=true;
+    editOut(`<span class="pat-ai-spin" aria-hidden="true"></span> 알아듣는 중…`);
+    try{
+      const cmds=await window.jnAiEdit(text,editContext());
+      showEditPlan(buildEditPlan(cmds));
+      $("aiEditInput").value="";
+    }catch(err){ console.error(err); editOut(`<b>못 알아들었어요.</b> ${escapeText(err&&err.userMsg||"잠시 후 다시 해 주세요.")}`,"err"); }
+    finally{ aiEditBusy=false; $("aiEditSend").disabled=false; }
+  });
   document.addEventListener("click",e=>{ if(e.target.closest("[data-ai-start]")) startAiScan(); });
   const AI_STAGE_NAMES={prep:"AI 준비",check:"보안 확인",shrink:"사진 줄이기",read:"AI가 읽는 중"};
   $("patAiFile").addEventListener("change",async e=>{
@@ -4399,6 +4546,60 @@
       return r;
     }
     window.jnAiParse=parseAiText;
+
+    // ===== v99: 말로 고치기 =====
+    const AI_EDIT_PROMPT=`너는 목재 재단 계산 앱의 수정 도우미야. 사용자가 한 말을 아래 형식의 줄로만 바꿔. 다른 말은 쓰지 마.
+
+수정: 부품코드 | 항목 | 값        (항목: 수량, 치수, 가로, 세로, 두께, 원장, 메모)
+삭제: 부품코드
+추가: 가로 x 세로 x 수량 | 두께 | 원장 | 메모
+설정: 항목 | 값                 (항목: 여유분, 톱날, 두께, 원장)
+계산: 예
+질문: 사용자에게 다시 물어볼 말
+
+규칙:
+- 부품코드는 아래 "현재 부품" 목록의 A, B, C… 를 그대로 써.
+- "전부", "모두", "30T는" 처럼 여러 부품을 말하면 해당하는 부품마다 한 줄씩 써.
+- 치수나 이름(예: 300짜리, 문짝)으로 말하면 목록에서 맞는 부품코드를 찾아.
+- 원장은 4×8, 4×10, 5×8 처럼 써.
+- "설정"의 두께·원장은 앞으로 새로 넣을 부품의 기본값이야. 이미 있는 부품을 바꾸라는 말이면 "수정"으로 써.
+- 무엇을 바꿀지 확실하지 않으면 바꾸지 말고 "질문:" 한 줄만 써.
+- 목록에 없는 부품을 지어내지 마.`;
+    function parseEditText(txt){
+      const out=[];
+      String(txt||"").split(/\r?\n/).forEach(raw=>{
+        const line=raw.replace(/\*\*/g,"").replace(/^[\s\-*•·>]+/,"").trim();
+        const m=line.match(/^([^:：]{1,6})[:：]\s*(.*)$/); if(!m) return;
+        const key=m[1].replace(/\s/g,""), seg=m[2].split("|").map(x=>x.trim());
+        if(key==="수정") out.push({type:"mod",code:seg[0],field:seg[1]||"",value:seg[2]||""});
+        else if(key==="삭제") out.push({type:"del",code:seg[0]});
+        else if(key==="추가") out.push({type:"add",size:seg[0],t:seg[1]||"",board:seg[2]||"",note:seg[3]||""});
+        else if(key==="설정") out.push({type:"set",field:seg[0],value:seg[1]||""});
+        else if(key==="계산") out.push({type:"calc"});
+        else if(key==="질문") out.push({type:"ask",text:m[2].trim()});
+      });
+      return out;
+    }
+    window.jnAiParseEdit=parseEditText;
+    window.jnAiEdit=async function(text,context){
+      if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.userMsg="AI 기능은 AI 재단노트 인터넷 주소에서만 돼요."; throw e; }
+      if(!user){ const e=new Error("login"); e.userMsg="로그인한 뒤에 써 주세요."; throw e; }
+      const model=await withTimeout(getAiModel(),20000,"AI 기능을 불러오지 못했어요. 다시 해 주세요.","prep-timeout");
+      const ctrl=new AbortController(); const tm=setTimeout(()=>ctrl.abort(),25000);
+      try{
+        const r=await model.generateContent(`${AI_EDIT_PROMPT}\n\n${context}\n\n사용자가 한 말: ${text}`,{signal:ctrl.signal,timeout:25000});
+        const txt=r.response.text();
+        console.info("[AI 고치기]",txt);
+        return parseEditText(txt);
+      }catch(err){
+        const m=String(err&&(err.message||err.code)||""); const e=new Error(m);
+        if(ctrl.signal.aborted) e.userMsg="AI 답이 늦어서 멈췄어요. 다시 해 주세요.";
+        else if(/429|quota|exhausted|rate/i.test(m)) e.userMsg="지금 AI 사용량이 많아요. 1분쯤 뒤에 다시 해 주세요.";
+        else if(/app.?check|recaptcha|401|403/i.test(m)) e.userMsg="보안 확인에 실패했어요. 잠시 후 다시 해 주세요.";
+        else e.userMsg="AI 연결에 문제가 생겼어요. 다시 해 주세요.";
+        throw e;
+      }finally{ clearTimeout(tm); }
+    };
     window.jnAiReadDrawing=async function(file,onStage,onPartial){
       const stage=k=>{ try{ onStage&&onStage(k); }catch(_){} };
       if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.code="proto"; e.userMsg="AI 기능은 AI 재단노트 인터넷 주소에서만 돼요."; throw e; }
@@ -6233,6 +6434,23 @@
   .ai-prow .input.ai-note{flex:1 1 120px;width:auto;min-width:90px;height:36px;font-size:13.5px;padding:4px 10px}
   .ai-prow .input.ai-sus{box-shadow:0 0 0 2px #F2B705 inset!important;background:#FFF3C4!important}
   .ai-warnline{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#6B4E00}
+  .ai-edit{margin-top:14px;border-top:1px solid var(--hair);padding-top:12px;display:flex;flex-direction:column;gap:8px}
+  .ai-edit-head{display:flex;align-items:center;gap:6px;font-size:14px}
+  .ai-edit-head .pat-ai-tag{background:linear-gradient(135deg,#1F5FD6,#6A4BE0);color:#fff}
+  .ai-edit-row{display:flex;gap:6px}
+  .ai-edit-row .input{flex:1;min-width:0;height:44px;font-size:15px}
+  .ai-edit-row .btn{height:44px;padding:0 14px;white-space:nowrap}
+  .ai-edit-out{font-size:13px;line-height:1.55;background:var(--blue-tint);border-radius:12px;padding:10px 12px;color:var(--ink)}
+  .ai-edit-out.ok{background:#EAF7EF;color:#1D5B36}
+  .ai-edit-out.warn{background:#FFF6DD;color:#6B4E00}
+  .ai-edit-out.err{background:#FDECEC;color:var(--danger)}
+  .ai-edit-out ul{margin:6px 0;padding-left:18px}
+  .ai-edit-skip{margin-top:4px;font-size:12.5px;color:#8A4B00}
+  .ai-edit-ask{margin-top:4px;font-weight:700}
+  .ai-edit-btns{display:flex;gap:6px;margin-top:8px}
+  .ai-edit-btns .btn{height:40px;flex:1}
+  .ai-undo{align-self:flex-start;border:0;background:none;color:var(--blue);font:inherit;font-size:13px;font-weight:700;cursor:pointer;padding:2px 0}
+  .ai-edit-hint{margin:0;font-size:11.5px;color:var(--ink-mute)}
   .ios-row.ios-sub{min-height:34px;font-size:12.5px;font-weight:800;color:var(--ink-soft);background:rgba(118,118,128,.06)}
   .irr-row .irr-name{font-weight:800;min-width:46px}
   .irr-row .irr-mm{flex:1;font-size:12px;color:var(--ink-mute)}
