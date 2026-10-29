@@ -1004,10 +1004,14 @@
       <p class="ios-foot fee-dep" id="feeModeHelp"></p>
 
       <div class="fee-dep">
-        <div class="ios-title">두께별 <span id="rateHead">컷당 단가(원)</span></div>
+        <div class="ios-title"><span id="rateHead">컷당 단가(원)</span></div>
         <div class="ios-group">
+          <div class="ios-row ios-sub">두께</div>
           <div class="set-rows" id="setRates"></div>
           <button class="ios-row ios-action" id="addRateRow" type="button">두께 구간 추가</button>
+          <div class="ios-row ios-sub">비규격</div>
+          <label class="set-row irr-row" for="setIrr410"><span class="irr-name">4×10</span><span class="irr-mm">1220×3050</span><input class="wide" id="setIrr410" type="number" inputmode="numeric" min="0" placeholder="비우면 두께 단가"><span>원</span></label>
+          <label class="set-row irr-row" for="setIrr58"><span class="irr-name">5×8</span><span class="irr-mm">1525×2440</span><input class="wide" id="setIrr58" type="number" inputmode="numeric" min="0" placeholder="비우면 두께 단가"><span>원</span></label>
         </div>
         <p class="ios-foot">단가표에 없는 두께는 결과에 "단가 설정 필요"로 표시됩니다.</p>
 
@@ -1191,10 +1195,16 @@
     companyName:"",logo:"",showFee:true,feeMode:"cut",
     rates:[{min:2.7,max:8.5,rate:4000},{min:9,max:18,rate:6000},{min:20,max:30,rate:10000}],
     discounts:[{minSheets:10,percent:0},{minSheets:30,percent:0}],
-    boardSizes:[{w:1220,h:2440},{w:1220,h:3050},{w:1525,h:2440},{w:1525,h:3050}]
+    boardSizes:[{w:1220,h:2440},{w:1220,h:3050},{w:1525,h:2440}],
+    irregularRates:{"4×10":null,"5×8":null}
   };
   const cloneDefaults=()=>JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-  function boardSizesOf(){ const b=settings&&Array.isArray(settings.boardSizes)&&settings.boardSizes.filter(x=>x&&x.w>0&&x.h>0); return b&&b.length?b:cloneDefaults().boardSizes; }
+  function boardSizesOf(){
+    const b=settings&&Array.isArray(settings.boardSizes)&&settings.boardSizes.filter(x=>x&&x.w>0&&x.h>0);
+    // v98: 예전 기본값(5×10 포함)을 그대로 쓰던 경우 새 기본값으로
+    if(b&&b.length===4&&JSON.stringify(b.map(x=>[x.w,x.h]))==="[[1220,2440],[1220,3050],[1525,2440],[1525,3050]]") return cloneDefaults().boardSizes;
+    return b&&b.length?b:cloneDefaults().boardSizes;
+  }
   let settings=loadSettings();
 
   function loadSettings(){
@@ -1250,6 +1260,9 @@
   function openSettings(){
     $("setCompany").value=settings.companyName||"";
     $("setBoards").value=boardSizesOf().map(b=>`${b.w}x${b.h}`).join(", ");
+    const ir=settings.irregularRates||{};
+    $("setIrr410").value=ir["4×10"]!=null?ir["4×10"]:"";
+    $("setIrr58").value=ir["5×8"]!=null?ir["5×8"]:"";
     setLogoPreview(settings.logo||"");
     $("setShowFee").checked=settings.showFee!==false;
     const mode=settings.feeMode==="sheet"?"sheet":"cut";
@@ -1304,7 +1317,10 @@
       if(n.length<2||!(n[0]>0&&n[1]>0)){ alert(`원장 크기 "${t}"를 읽을 수 없어요. 1220x2440처럼 적어 주세요.`); return; }
       boardSizes.push({w:Math.min(n[0],n[1]),h:Math.max(n[0],n[1])});
     }
+    const irr410=readNum($("setIrr410")), irr58=readNum($("setIrr58"));
+    if((irr410!==null&&irr410<0)||(irr58!==null&&irr58<0)){ alert("비규격 단가는 0원 이상으로 입력해 주세요."); return; }
     settings={
+      irregularRates:{"4×10":irr410,"5×8":irr58},
       boardSizes:boardSizes.length?boardSizes:cloneDefaults().boardSizes,
       companyName:$("setCompany").value.trim(),
       logo:$("setLogoPreview").dataset.value||"",
@@ -3082,13 +3098,20 @@
     };
   }
 
+  function irregularRateOf(board){
+    const v=(settings.irregularRates||{})[board];
+    return v===null||v===undefined||v===""||!(Number(v)>=0)?null:Number(v);
+  }
   function buildFeeDetails(entries){
     const grouped=new Map();
 
     entries.forEach(entry=>{
-      const key=String(entry.thickness);
+      const irr=entry.board?irregularRateOf(entry.board):null;
+      const key=irr!==null?`${entry.thickness}|${entry.board}`:String(entry.thickness);
       if(!grouped.has(key)){
         grouped.set(key,{
+          irregular:irr!==null?entry.board:null,
+          irregularRate:irr,
           thickness:Number(entry.thickness),
           sheetCount:0,
           cutCount:0,
@@ -3102,9 +3125,15 @@
     });
 
     const details=[...grouped.values()]
-      .sort((a,b)=>a.thickness-b.thickness)
+      .sort((a,b)=>a.thickness-b.thickness||(a.irregular?1:0)-(b.irregular?1:0))
       .map(group=>{
-        const pricing=getCutPricing(group.thickness,group.sheetCount);
+        let pricing=getCutPricing(group.thickness,group.sheetCount);
+        if(group.irregular){
+          const applicable=(settings.discounts||[]).filter(d=>group.sheetCount>=d.minSheets).sort((a,b)=>b.minSheets-a.minSheets);
+          const discountPercent=applicable.length?Number(applicable[0].percent)||0:0;
+          const finalRate=Math.max(0,Math.round(group.irregularRate*(1-discountPercent/100)));
+          pricing={supported:true,thickness:group.thickness,baseRate:group.irregularRate,discountPercent,discount:group.irregularRate-finalRate,finalRate};
+        }
         return {
           ...group,
           ...pricing,
@@ -3145,7 +3174,7 @@
       return `
         <div class="fee-row">
           <div class="fee-row-head">
-            <span>두께 ${detail.thickness.toLocaleString()}mm</span>
+            <span>두께 ${detail.thickness.toLocaleString()}mm${detail.irregular?` · ${detail.irregular} <em class="irr-tag">비규격</em>`:""}</span>
             <strong>${detail.fee.toLocaleString()}원</strong>
           </div>
           <div class="fee-row-detail">
@@ -6204,6 +6233,11 @@
   .ai-prow .input.ai-note{flex:1 1 120px;width:auto;min-width:90px;height:36px;font-size:13.5px;padding:4px 10px}
   .ai-prow .input.ai-sus{box-shadow:0 0 0 2px #F2B705 inset!important;background:#FFF3C4!important}
   .ai-warnline{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#6B4E00}
+  .ios-row.ios-sub{min-height:34px;font-size:12.5px;font-weight:800;color:var(--ink-soft);background:rgba(118,118,128,.06)}
+  .irr-row .irr-name{font-weight:800;min-width:46px}
+  .irr-row .irr-mm{flex:1;font-size:12px;color:var(--ink-mute)}
+  .irr-row input.wide{width:120px!important}
+  .irr-tag{font-style:normal;font-size:11px;font-weight:800;color:#8A4B00;background:#FFF0D6;border-radius:6px;padding:1px 6px;margin-left:2px}
   .metric-sub{display:block;margin-top:4px;font-size:12.5px;font-weight:700;color:var(--ink-soft);letter-spacing:-.1px}
   #feeMetric .metric-sub,.metric.fee .metric-sub{color:rgba(255,255,255,.85)}
   .bd-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
