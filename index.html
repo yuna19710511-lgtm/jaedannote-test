@@ -899,6 +899,7 @@
           </table>
         </div>
         <button class="text-danger" id="clearBtn" type="button">부품 전체 삭제</button>
+        <div class="ai-edit-home" id="aiEditHome"></div>
         <div class="ai-edit" id="aiEdit">
           <div class="ai-edit-head"><b>💬 말로 고치기</b><span class="pat-ai-tag">AI</span></div>
           <form class="ai-edit-row" id="aiEditForm" autocomplete="off">
@@ -970,6 +971,9 @@
   </main>
 </div>
 
+<button type="button" class="ai-edit-fab" id="aiEditFab">💬 말로 고치기</button>
+<div class="ai-edit-sheet-bd" id="aiEditSheetBd" hidden></div>
+<div class="ai-edit-sheet" id="aiEditSheet" hidden><div class="ai-edit-sheet-head"><b>말로 고치기</b><button type="button" class="nav-btn" id="aiEditSheetClose">닫기</button></div><div id="aiEditSheetBody"></div></div>
 <div class="settings-backdrop" id="settingsBackdrop" hidden>
   <div class="settings-modal" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
     <div class="settings-head">
@@ -1979,7 +1983,7 @@
     document.querySelectorAll(".pat-dir-btn").forEach(x=>x.classList.toggle("active",x.dataset.dir===patDir));
   }
   const numOr=(v)=>{ const n=Number(v); return Number.isFinite(n)&&n>0?Math.round(n*10)/10:null; };
-  let aiParts=[], aiQuestions=[], aiPrefBoard=null;
+  let aiParts=[], aiQuestions=[], aiPrefBoard=null, aiRvMsg="", aiRvKind="", aiRvUndo=null, aiRvBusy=false;
   function aiFillPattern(r){
     const strips=(Array.isArray(r.strips)?r.strips:[]).map(t=>{
       const rest=!!t.rest || t.size==null;
@@ -2025,6 +2029,7 @@
       ${tKeys.length>1?`<div class="ai-tsum">두께별: ${tKeys.map(k=>`<b>${escapeText(k)}</b> ${tCount[k]}개`).join(" · ")}</div>`:""}
       ${bad?`<div class="ai-badmsg">⛔ 등록된 원장보다 큰 부품이 ${bad}개 있어요. 원장을 고르거나, 설정 → 취급하는 원장에 크기를 추가해 주세요.</div>`:""}
       ${aiParts.map((p,k)=>{ const sus=p.unclear?suspectFields(p):[]; const hl=f=>sus.includes(f)?" ai-sus":""; return `<div class="ai-prow${p.unclear?" pat-warn":""}${!p.board?" ai-bad":""}" data-k="${k}">
+        <span class="ai-no">${k+1}</span>
         <input class="input${hl("a")}" data-f="a" type="number" inputmode="decimal" value="${p.a??""}" aria-label="치수1">
         <span>×</span><input class="input${hl("b")}" data-f="b" type="number" inputmode="decimal" value="${p.b??""}" aria-label="치수2">
         <span>×</span><input class="input ai-q${hl("qty")}" data-f="qty" type="number" inputmode="numeric" value="${p.qty??1}" aria-label="수량"><span>개</span>
@@ -2039,6 +2044,11 @@
         </div>
         ${p.unclear?`<div class="ai-warnline"><span>⚠ 도면과 비교해 주세요. 숫자를 눌러 고칠 수 있어요.</span><button type="button" class="ai-okbtn" data-ok="${k}">✓ 맞아요</button></div>`:""}
       </div>`; }).join("")}
+      <form class="ai-edit-row ai-rv-form" id="aiRvForm" autocomplete="off">
+        <input class="input" id="aiRvInput" type="text" enterkeyhint="send" placeholder="💬 말로 고치기: 2번 수량 8개로 · 노란 줄 다 맞아">
+        <button class="btn btn-outline" id="aiRvSend" type="submit">보내기</button>
+      </form>
+      ${aiRvMsg?`<div class="ai-edit-out ${aiRvKind}">${aiRvMsg}${aiRvUndo?` <button type="button" class="ai-undo" id="aiRvUndo">↩ 되돌리기</button>`:""}</div>`:""}
       <button type="button" class="btn btn-primary ai-addall" id="aiAddAll">부품 ${aiParts.length}개 모두 추가</button>
     </div>`;
   }
@@ -2068,6 +2078,8 @@
     }));
     box.querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click",()=>{ aiParts.splice(Number(b.dataset.del),1); redrawAiBox(); }));
     $("aiAddAll")?.addEventListener("click",addAiParts);
+    $("aiRvForm")?.addEventListener("submit",e=>{ e.preventDefault(); runReviewEdit($("aiRvInput").value.trim()); });
+    $("aiRvUndo")?.addEventListener("click",()=>{ if(!aiRvUndo) return; aiParts=aiRvUndo; aiRvUndo=null; aiRvMsg="↩ 되돌렸어요."; aiRvKind="ok"; redrawAiBox(); });
     $("aiCopyQ")?.addEventListener("click",async()=>{
       const t=aiQuestionText();
       try{ await navigator.clipboard.writeText(t); }
@@ -2098,6 +2110,7 @@
     toast(`부품 ${n}개를 추가했어요.`);
   }
   function applyAiDrawing(r,timing){
+    aiRvMsg=""; aiRvUndo=null;
     const aiQuestions_extra=[];
     const bw0=Number($("boardW").value), bh0=Number($("boardH").value);
     const dwb=numOr(r.board&&r.board.short), dhb=numOr(r.board&&r.board.long);
@@ -2154,6 +2167,78 @@
   }
   $("patAiBtn").addEventListener("click",startAiScan);
 
+  // ===== v100: 확인 목록을 말로 고치기 =====
+  function reviewContext(){
+    return `확인 중인 부품 (번호가 부품코드):\n${aiParts.map((p,k)=>`${k+1}: ${p.a} x ${p.b} x ${p.qty}개 | ${p.t||"?"}T | ${p.board?boardName(p.board.w,p.board.h):"맞는 원장 없음"}${p.note?" | "+p.note:""}${p.unclear?" | 확인 필요":""}`).join("\n")}\n기본 설정: 여유분 ${getEdgeTrimMM()}, 톱날 ${$("kerfInput").value}\n취급 원장: ${boardSizesOf().map(b=>`${boardName(b.w,b.h)}(${b.w}x${b.h})`).join(", ")}`;
+  }
+  function applyReviewCmds(cmds){
+    const done=[], skip=[], asks=[];
+    const num=v=>{ const m=String(v).replace(/,/g,"").match(/-?\d+(?:\.\d+)?/); return m?Number(m[0]):NaN; };
+    const idx=c=>{ const n=parseInt(String(c).replace(/[^0-9]/g,""),10); return n>=1&&n<=aiParts.length?n-1:-1; };
+    const dels=new Set();
+    cmds.forEach(c=>{
+      if(c.type==="ask"){ asks.push(c.text); return; }
+      if(c.type==="calc") return;
+      if(c.type==="ok"){
+        if(/전부|모두|다|all/i.test(c.code)){ aiParts.forEach(p=>p.unclear=false); done.push("노란 줄 모두 확인"); return; }
+        const k=idx(c.code); if(k<0){ skip.push(`"${c.code}"번을 찾지 못했어요`); return; } aiParts[k].unclear=false; done.push(`${k+1}번 확인`); return;
+      }
+      if(c.type==="set"){
+        const v=num(c.value), f=c.field;
+        if(/여유|margin|trim/i.test(f)&&v>=0){ $("edgeTrimInput").value=String(v); $("edgeTrimInput").dispatchEvent(new Event("input",{bubbles:true})); done.push(`여유분 ${v}mm`); }
+        else if(/톱|kerf|blade|saw/i.test(f)&&v>=0){ $("kerfInput").value=String(v); $("kerfInput").dispatchEvent(new Event("input",{bubbles:true})); done.push(`톱날 ${v}mm`); }
+        else skip.push(`"${f}" 설정`);
+        return;
+      }
+      if(c.type==="add"){
+        const n=(String(c.size).match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+        if(n.length<2){ skip.push(`추가 치수 "${c.size}"`); return; }
+        const t=num(c.t)>0?num(c.t):(aiParts[0]&&aiParts[0].t)||Number($("boardT").value);
+        const b=(c.board&&findBoardByName(c.board))||pickBoard(n[0],n[1],aiPrefBoard);
+        aiParts.push({a:n[0],b:n[1],qty:Math.max(1,Math.floor(n[2]||1)),t,board:b,note:c.note||"",unclear:false});
+        done.push(`추가: ${n[0]}×${n[1]} × ${Math.max(1,Math.floor(n[2]||1))}개`); return;
+      }
+      const k=idx(c.code); if(k<0){ skip.push(`"${c.code}"번을 찾지 못했어요`); return; }
+      const p=aiParts[k];
+      if(c.type==="del"){ dels.add(k); done.push(`${k+1}번 삭제`); return; }
+      if(c.type==="mod"){
+        const f=String(c.field||""), v=num(c.value);
+        if(/수량|개수|qty|quantity|count|pcs/i.test(f)&&v>=1){ p.qty=Math.floor(v); p.unclear=false; done.push(`${k+1}번 수량 ${p.qty}개`); return; }
+        if(/두께|thick/i.test(f)&&v>0){ p.t=v; p.unclear=false; done.push(`${k+1}번 두께 ${v}T`); return; }
+        if(/원장|board|sheet/i.test(f)){ const b=findBoardByName(c.value); if(b&&fitsBoard(Number(p.a),Number(p.b),b)){ p.board=b; done.push(`${k+1}번 원장 ${boardName(b.w,b.h)}`); } else skip.push(`${k+1}번 원장 "${c.value}"`); return; }
+        if(/메모|note|memo/i.test(f)){ p.note=String(c.value).slice(0,60); done.push(`${k+1}번 메모`); return; }
+        if(/치수|가로|세로|크기|size|width|length|height/i.test(f)){
+          const n=(String(c.value).match(/\d+(?:\.\d+)?/g)||[]).map(Number);
+          if(n.length>=2){ p.a=n[0]; p.b=n[1]; } else if(n.length===1){ if(/세로|length|height|2/i.test(f)) p.b=n[0]; else if(/가로|width|1/i.test(f)) p.a=n[0]; else { // 한 숫자만: 원래 값과 자리수가 비슷한 쪽
+              const da=Math.abs(String(Math.round(p.a)).length-String(n[0]).length), db=Math.abs(String(Math.round(p.b)).length-String(n[0]).length); if(db<da) p.b=n[0]; else p.a=n[0]; } }
+          else { skip.push(`${k+1}번 치수 "${c.value}"`); return; }
+          if(!(p.board&&fitsBoard(Number(p.a),Number(p.b),p.board))) p.board=pickBoard(Number(p.a),Number(p.b),aiPrefBoard);
+          p.unclear=false; done.push(`${k+1}번 치수 ${p.a}×${p.b}`); return;
+        }
+        skip.push(`${k+1}번 "${f}"`);
+      }
+    });
+    if(dels.size) aiParts=aiParts.filter((_,i)=>!dels.has(i));
+    return {done,skip,asks};
+  }
+  async function runReviewEdit(text){
+    if(!text||aiRvBusy) return;
+    if(!window.jnAiEdit){ toast("AI 기능을 불러오지 못했어요. 새로고침해 주세요."); return; }
+    aiRvBusy=true; const before=JSON.parse(JSON.stringify(aiParts));
+    aiRvMsg=`<span class="pat-ai-spin" aria-hidden="true"></span> 알아듣는 중…`; aiRvKind=""; aiRvUndo=null; redrawAiBox();
+    try{
+      const cmds=await window.jnAiEdit(text,reviewContext(),"review");
+      const r=applyReviewCmds(cmds);
+      let m="";
+      if(r.done.length){ m+=`<b>✓ 고쳤어요:</b> ${r.done.map(escapeText).join(" · ")}`; aiRvUndo=before; }
+      if(r.skip.length) m+=`${m?"<br>":""}⚠ 못 고친 것: ${r.skip.map(escapeText).join(" · ")}`;
+      if(r.asks.length) m+=`${m?"<br>":""}💬 ${r.asks.map(escapeText).join(" ")}`;
+      if(!m) m="💬 무엇을 고칠지 알아듣지 못했어요. 예: \"2번 수량 8개로\"";
+      aiRvMsg=m; aiRvKind=r.done.length?"ok":"warn";
+    }catch(err){ console.error(err); aiRvMsg=`<b>못 알아들었어요.</b> ${escapeText(err&&err.userMsg||"잠시 후 다시 해 주세요.")}`; aiRvKind="err"; }
+    finally{ aiRvBusy=false; redrawAiBox(); }
+  }
+
   // ===== v99: 말로 고치기 =====
   let aiEditPlan=null, aiUndoSnap=null, aiEditBusy=false;
   const editOut=(html,kind)=>{ const el=$("aiEditOut"); if(!html){ el.hidden=true; el.innerHTML=""; return; } el.hidden=false; el.className="ai-edit-out"+(kind?" "+kind:""); el.innerHTML=html; };
@@ -2183,10 +2268,11 @@
     cmds.forEach(c=>{
       if(c.type==="ask"){ asks.push(c.text); return; }
       if(c.type==="calc"){ ops.push({kind:"calc",label:"다시 계산"}); return; }
+      if(c.type==="ok") return;
       if(c.type==="set"){
         const v=num(c.value), f=c.field;
-        if(/여유/.test(f)&&v>=0) ops.push({kind:"set",id:"edgeTrimInput",value:v,label:`여유분 ${getEdgeTrimMM()} → ${v}mm`});
-        else if(/톱/.test(f)&&v>=0) ops.push({kind:"set",id:"kerfInput",value:v,label:`톱날 두께 ${$("kerfInput").value} → ${v}mm`});
+        if(/여유|margin|trim/i.test(f)&&v>=0) ops.push({kind:"set",id:"edgeTrimInput",value:v,label:`여유분 ${getEdgeTrimMM()} → ${v}mm`});
+        else if(/톱|kerf|blade|saw/i.test(f)&&v>=0) ops.push({kind:"set",id:"kerfInput",value:v,label:`톱날 두께 ${$("kerfInput").value} → ${v}mm`});
         else if(/두께/.test(f)&&v>0) ops.push({kind:"set",id:"boardT",value:v,label:`새로 넣을 부품 기본 두께 ${$("boardT").value} → ${v}T`});
         else if(/원장/.test(f)){ const b=findBoardByName(c.value); if(b) ops.push({kind:"setBoard",board:b,label:`새로 넣을 부품 기본 원장 → ${boardName(b.w,b.h)} (${b.w}×${b.h})`}); else skip.push(`원장 "${c.value}"를 알 수 없어요`); }
         else skip.push(`"${f}" 설정은 바꿀 수 없어요`);
@@ -2208,20 +2294,20 @@
       if(c.type==="del"){ ops.push({kind:"del",i,label:`삭제: ${code} ${partTitle(p)}`}); return; }
       if(c.type==="mod"){
         const f=String(c.field||""), v=num(c.value);
-        if(/수량|개수|장수/.test(f)){
+        if(/수량|개수|장수|qty|quantity|count|pcs/i.test(f)){
           if(!(v>=1)){ skip.push(`${code} 수량 "${c.value}"`); return; }
           if(p.pat){ ops.push({kind:"mod",i,patch:{patBoards:Math.floor(v),qty:calcMode==="reverse"?Math.floor(v):p.patPer*Math.floor(v)},label:`${code} 장수 ${p.patBoards} → ${Math.floor(v)}장`}); return; }
           if(p.div){ skip.push(`${code}는 등분 부품이라 장수는 직접 고쳐 주세요`); return; }
           ops.push({kind:"mod",i,patch:{qty:Math.floor(v)},label:`${code} ${p.w}×${p.h} 수량 ${p.qty} → ${Math.floor(v)}개`}); return;
         }
-        if(/두께/.test(f)){ if(!(v>0)){ skip.push(`${code} 두께 "${c.value}"`); return; } ops.push({kind:"mod",i,patch:{boardT:v},label:`${code} 두께 ${p.boardT} → ${v}T`}); return; }
-        if(/원장/.test(f)){
+        if(/두께|thick/i.test(f)){ if(!(v>0)){ skip.push(`${code} 두께 "${c.value}"`); return; } ops.push({kind:"mod",i,patch:{boardT:v},label:`${code} 두께 ${p.boardT} → ${v}T`}); return; }
+        if(/원장|board|sheet/i.test(f)){
           const b=findBoardByName(c.value); if(!b){ skip.push(`원장 "${c.value}"를 알 수 없어요`); return; }
           if(!p.pat&&!p.div&&!fitsBoard(p.w,p.h,b)){ skip.push(`${code} ${p.w}×${p.h}은 ${boardName(b.w,b.h)}에 안 들어가요`); return; }
           if(p.pat||p.div){ skip.push(`${code}는 모양대로·등분 부품이라 원장은 직접 고쳐 주세요`); return; }
           ops.push({kind:"mod",i,patch:{boardW:b.w,boardH:b.h},label:`${code} 원장 ${boardName(p.boardW,p.boardH)} → ${boardName(b.w,b.h)}`}); return;
         }
-        if(/치수|가로|세로|크기/.test(f)){
+        if(/치수|가로|세로|크기|size|width|length|height/i.test(f)){
           if(p.pat||p.div){ skip.push(`${code}는 모양대로·등분 부품이라 치수는 직접 고쳐 주세요`); return; }
           const n=(String(c.value).match(/\d+(?:\.\d+)?/g)||[]).map(Number);
           let w=p.w,h=p.h;
@@ -2266,14 +2352,28 @@
     renderParts(); resetResult();
     editOut(`<b>✓ 바꿨어요.</b> ${plan.ops.filter(o=>o.kind!=="calc").length}가지`,"ok");
     $("aiUndo").hidden=false;
-    if(parts.length && (had || plan.ops.some(o=>o.kind==="calc"))) calculate();
+    closeEditSheet();
+    if(parts.length) $("calculateBtn").click();   // 다시 계산 + 폰은 결과 화면으로
     toast("말한 대로 고쳤어요.");
   }
+  function openEditSheet(){
+    $("aiEditSheetBody").appendChild($("aiEdit"));
+    $("aiEditSheetBd").hidden=false; $("aiEditSheet").hidden=false;
+    setTimeout(()=>{ try{ $("aiEditInput").focus(); }catch(_){} },150);
+  }
+  function closeEditSheet(){
+    if($("aiEditSheet").hidden) return;
+    $("aiEditHome").insertAdjacentElement("afterend",$("aiEdit"));
+    $("aiEditSheet").hidden=true; $("aiEditSheetBd").hidden=true;
+  }
+  $("aiEditFab").addEventListener("click",()=>{ if(!parts.length){ toast("먼저 부품을 넣어 주세요."); return; } openEditSheet(); });
+  $("aiEditSheetClose").addEventListener("click",closeEditSheet);
+  $("aiEditSheetBd").addEventListener("click",closeEditSheet);
   $("aiUndo").addEventListener("click",()=>{
     if(!aiUndoSnap) return;
     parts=aiUndoSnap.parts; aiUndoSnap.vals.forEach(([id,v])=>{ $(id).value=v; $(id).dispatchEvent(new Event("input",{bubbles:true})); });
     const had=aiUndoSnap.had; aiUndoSnap=null;
-    renderParts(); resetResult(); if(had&&parts.length) calculate();
+    renderParts(); resetResult(); if(had&&parts.length) $("calculateBtn").click();
     $("aiUndo").hidden=true; editOut("↩ 되돌렸어요.","ok");
   });
   $("aiEditForm").addEventListener("submit",async e=>{
@@ -2284,7 +2384,7 @@
     aiEditBusy=true; $("aiEditSend").disabled=true;
     editOut(`<span class="pat-ai-spin" aria-hidden="true"></span> 알아듣는 중…`);
     try{
-      const cmds=await window.jnAiEdit(text,editContext());
+      const cmds=await window.jnAiEdit(text,editContext(),"parts");
       showEditPlan(buildEditPlan(cmds));
       $("aiEditInput").value="";
     }catch(err){ console.error(err); editOut(`<b>못 알아들었어요.</b> ${escapeText(err&&err.userMsg||"잠시 후 다시 해 주세요.")}`,"err"); }
@@ -4554,6 +4654,7 @@
 삭제: 부품코드
 추가: 가로 x 세로 x 수량 | 두께 | 원장 | 메모
 설정: 항목 | 값                 (항목: 여유분, 톱날, 두께, 원장)
+확인: 부품코드 또는 전부          (확인 필요 표시를 지울 때)
 계산: 예
 질문: 사용자에게 다시 물어볼 말
 
@@ -4563,7 +4664,9 @@
 - 치수나 이름(예: 300짜리, 문짝)으로 말하면 목록에서 맞는 부품코드를 찾아.
 - 원장은 4×8, 4×10, 5×8 처럼 써.
 - "설정"의 두께·원장은 앞으로 새로 넣을 부품의 기본값이야. 이미 있는 부품을 바꾸라는 말이면 "수정"으로 써.
-- 무엇을 바꿀지 확실하지 않으면 바꾸지 말고 "질문:" 한 줄만 써.
+- "맞아", "확인했어", "다 맞아"는 확인 줄로 써.
+- 사용자는 한국어나 영어로 말할 수 있어 (예: "B quantity 8", "change margin to 10", "delete C"). 어떤 말로 해도 답은 위 형식(한국어 항목 이름)으로만 써.
+- 무엇을 바꿀지 확실하지 않으면 바꾸지 말고 "질문:" 한 줄만 써. 사용자가 영어로 말했으면 질문도 영어로 써.
 - 목록에 없는 부품을 지어내지 마.`;
     function parseEditText(txt){
       const out=[];
@@ -4576,18 +4679,19 @@
         else if(key==="추가") out.push({type:"add",size:seg[0],t:seg[1]||"",board:seg[2]||"",note:seg[3]||""});
         else if(key==="설정") out.push({type:"set",field:seg[0],value:seg[1]||""});
         else if(key==="계산") out.push({type:"calc"});
+        else if(key==="확인") out.push({type:"ok",code:seg[0]});
         else if(key==="질문") out.push({type:"ask",text:m[2].trim()});
       });
       return out;
     }
     window.jnAiParseEdit=parseEditText;
-    window.jnAiEdit=async function(text,context){
+    window.jnAiEdit=async function(text,context,mode){
       if(!/^https:$/.test(location.protocol)){ const e=new Error("proto"); e.userMsg="AI 기능은 AI 재단노트 인터넷 주소에서만 돼요."; throw e; }
       if(!user){ const e=new Error("login"); e.userMsg="로그인한 뒤에 써 주세요."; throw e; }
       const model=await withTimeout(getAiModel(),20000,"AI 기능을 불러오지 못했어요. 다시 해 주세요.","prep-timeout");
       const ctrl=new AbortController(); const tm=setTimeout(()=>ctrl.abort(),25000);
       try{
-        const r=await model.generateContent(`${AI_EDIT_PROMPT}\n\n${context}\n\n사용자가 한 말: ${text}`,{signal:ctrl.signal,timeout:25000});
+        const r=await model.generateContent(`${AI_EDIT_PROMPT}${mode==="review"?"\n- 지금은 도면에서 읽은 부품을 확인하는 단계야. 부품코드는 번호(1, 2, 3…)야.":""}\n\n${context}\n\n사용자가 한 말: ${text}`,{signal:ctrl.signal,timeout:25000});
         const txt=r.response.text();
         console.info("[AI 고치기]",txt);
         return parseEditText(txt);
@@ -6434,6 +6538,22 @@
   .ai-prow .input.ai-note{flex:1 1 120px;width:auto;min-width:90px;height:36px;font-size:13.5px;padding:4px 10px}
   .ai-prow .input.ai-sus{box-shadow:0 0 0 2px #F2B705 inset!important;background:#FFF3C4!important}
   .ai-warnline{flex-basis:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:700;color:#6B4E00}
+  .ai-prow > .input{padding:4px 6px!important;font-size:14.5px!important;text-align:center}
+  .ai-prow{gap:4px}
+  .ai-no{flex:0 0 20px;height:20px;border-radius:50%;background:var(--blue);color:#fff;font-size:12px;font-weight:800;display:grid;place-items:center}
+  .ai-rv-form{margin-top:4px}
+  .ai-rv-form .input{font-size:14px!important}
+  .ai-parts .ai-edit-out{margin-top:2px}
+  .ai-edit-fab{display:none}
+  .ai-edit-sheet-bd{position:fixed;inset:0;background:rgba(10,20,40,.35);z-index:90}
+  .ai-edit-sheet{position:fixed;left:0;right:0;bottom:0;z-index:91;background:#fff;border-radius:20px 20px 0 0;padding:14px 16px calc(16px + env(safe-area-inset-bottom));box-shadow:0 -10px 30px rgba(10,30,70,.18);max-height:80vh;overflow:auto}
+  .ai-edit-sheet[hidden],.ai-edit-sheet-bd[hidden]{display:none}
+  .ai-edit-sheet-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+  .ai-edit-sheet .ai-edit{margin-top:0;border-top:0;padding-top:0}
+  .ai-edit-sheet .ai-edit-head{display:none}
+  @media (max-width:980px){
+    body[data-view="result"] .ai-edit-fab{display:flex;align-items:center;gap:6px;position:fixed;right:16px;bottom:calc(20px + env(safe-area-inset-bottom));z-index:80;border:0;border-radius:999px;padding:13px 18px;font:inherit;font-size:15px;font-weight:800;color:#fff;background:linear-gradient(135deg,#1F5FD6,#6A4BE0);box-shadow:0 10px 26px rgba(31,95,214,.38);cursor:pointer}
+  }
   .ai-edit{margin-top:14px;border-top:1px solid var(--hair);padding-top:12px;display:flex;flex-direction:column;gap:8px}
   .ai-edit-head{display:flex;align-items:center;gap:6px;font-size:14px}
   .ai-edit-head .pat-ai-tag{background:linear-gradient(135deg,#1F5FD6,#6A4BE0);color:#fff}
