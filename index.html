@@ -2340,6 +2340,7 @@
     const F=["t","w","h","q"];
     const NAME={t:"두께",w:"가로",h:"세로",q:"수량"};
     const LIMIT={t:[1,100],w:[1,6000],h:[1,6000],q:[1,999]};
+    const MAX_T=30;   // 현장에서 가장 두꺼운 판 (두께 차례에 이보다 크면 가로로 봄)
     let v={t:null,w:null,h:null,q:null}, cur="w", added=[], rec=null, want=false, quiet=0, pending=false, editing=false;
     const full=()=>v.t!=null&&v.w!=null&&v.h!=null&&v.q!=null;
     const askOk=()=>{ pending=true; editing=false; cur="q"; guide(`<b>${v.t}T · ${Number(v.w).toLocaleString()}×${Number(v.h).toLocaleString()} · ${v.q}개</b> 맞나요?<br><small>맞으면 "네" 또는 다음 부품 가로를 말해요</small>`); };
@@ -2471,7 +2472,10 @@
       const r=parse(text);
       if(r.cmds.includes("done")&&!r.vals.length){ commit(); finish(); return; }
       if(r.cmds.includes("undo")){ undo(); return; }
-      if(r.cmds.includes("yes")&&!r.vals.length){ if(!commit()) guide(); render(); return; }
+      if(r.cmds.includes("yes")&&!r.vals.length){
+        if(!pending && cur==="t" && v.t!=null){ cur="w"; guide(); render(); return; }
+        if(!commit()) guide(); render(); return;
+      }
       if(r.cmds.includes("clear")&&!r.vals.length){
         v={t:v.t,w:null,h:null,q:null}; pending=false; editing=false; cur="w"; guide(`지웠어요. <b>가로</b>부터 다시 말해 주세요`);
         render(); return;
@@ -2484,7 +2488,7 @@
         // 확인 기다리는 중에 칸 이름 없이 숫자를 말함 → 앞 부품을 넣고, 이 숫자는 다음 부품 가로로
         if(pending && full() && !x.f && !editing){ if(!commit()) break; }
         let f=x.f||cur;
-        if(!x.f && f==="t" && x.n>100) f=v.w==null?"w":"h";   // 두께 칸인데 큰 숫자 → 가로로
+        if(!x.f && f==="t" && x.n>MAX_T) f=v.w==null?"w":"h";   // 두께 칸인데 30보다 큰 숫자 → 가로로 (두께는 그대로)
         if(!setVal(f,x.n)){ cur=f; render(); return; }
         if(full()){ askOk(); continue; }
         pending=false; editing=false;
@@ -2502,15 +2506,21 @@
       if(rec) return;
       let r; try{ r=new SR(); }catch(e){ return; }
       r.lang=EN()?"en-US":"ko-KR"; r.interimResults=true; r.continuous=false; r.maxAlternatives=5;
-      let got=false, interim="";
+      let got=false, interim="", sp=0;
       r.onaudiostart=()=>{ if(!$("vzHeard").textContent) $("vzHeard").textContent=EN()?"🎙 Listening…":"🎙 듣는 중…"; };
-      r.onspeechstart=()=>{ $("vzHeard").textContent=EN()?"🎙 Hearing you…":"🎙 말소리가 들려요…"; };
+      r.onspeechstart=()=>{ sp=Date.now(); if(!heardBusy()) $("vzHeard").textContent=EN()?"🎙 Hearing you…":"🎙 말소리가 들려요…"; };
+      const take=t=>{
+        const P=sp||Date.now()-900; srInterimAt=0;
+        if(mode==="ai" && aiDone.some(a=>P>=a.s-800&&P<=a.e+400)) return;   // AI가 이미 넣은 말
+        if(hasNum(t)) srLog.push({p:P,at:Date.now()});
+        handle(t);
+      };
       r.onresult=ev=>{
         let t="", fin=false;
         for(let i=ev.resultIndex;i<ev.results.length;i++){ const res=ev.results[i]; if(res.isFinal){ fin=true; t+=pick(res); } else t+=res[0].transcript; }
         t=t.trim();
-        if(fin){ got=true; interim=""; quiet=0; handle(t); }
-        else if(t){ interim=t; $("vzHeard").textContent=`"${t}" …`; }
+        if(fin){ got=true; interim=""; quiet=0; take(t); }
+        else if(t){ interim=t; if(!sp) sp=Date.now()-600; srInterimAt=sp; $("vzHeard").classList.remove("dim"); $("vzHeard").textContent=`"${t}" …`; }
       };
       r.onerror=ev=>{
         if(ev.error==="not-allowed"){ want=false; guide("마이크를 쓸 수 있게 허용해 주세요. 숫자 칸을 눌러 직접 넣어도 돼요."); }
@@ -2521,9 +2531,10 @@
       r.onend=()=>{
         rec=null;
         // 끝 신호 없이 끝났지만 중간에 들린 말이 있으면 그걸 씀 (짧은 한 마디)
-        if(!got && interim){ got=true; quiet=0; const t=interim; interim=""; handle(t); }
+        if(!got && interim){ got=true; quiet=0; const t=interim; interim=""; take(t); }
+        srInterimAt=0;
         if(!got){ quiet++; if(/🎙/.test($("vzHeard").textContent)) $("vzHeard").textContent=""; }
-        if(want && quiet<4 && !$("vzBackdrop").hidden){ setTimeout(()=>{ if(want&&!rec){ try{ listen(); }catch(e){ want=false; render(); } } },120); }
+        if(want && (quiet<4 || mode==="ai") && !$("vzBackdrop").hidden){ setTimeout(()=>{ if(want&&!rec){ try{ listen(); }catch(e){ want=false; render(); } } },120); }
         else{ if(quiet>=4){ want=false; guide(`말이 없어서 잠시 멈췄어요. 🎤를 눌러 계속해요`); quiet=0; } render(); }
       };
       rec=r;
@@ -2533,7 +2544,8 @@
     // --- v109: AI가 듣기 — 말소리가 나면 알아서 녹음해서 Gemini로 보냄 (손 안 대고) ---
     const AI=(()=>{
       let ctx=null, stream=null, node=null, src=null, on=false, cal=[], floor=0.006, speaking=false, buf=[], pre=[], loud=0, quietMs=0, busy=0, q=[], wake=null, failN=0;
-      const PRE=6, END_MS=650, MAX_MS=7000, MIN_MS=180;
+      const PRE=6, END_MS=450, MAX_MS=7000, MIN_MS=180;
+      let segS=0;
       const rms=a=>{ let x=0; for(let i=0;i<a.length;i++) x+=a[i]*a[i]; return Math.sqrt(x/a.length); };
       function wav(chunks,rate){
         let n=0; chunks.forEach(c=>n+=c.length);
@@ -2548,19 +2560,20 @@
         let bin=""; const u=new Uint8Array(bufA); for(let i=0;i<u.length;i+=0x8000) bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));
         return btoa(bin);
       }
-      async function send(b64){
+      async function send(job){
         busy++; render();
-        $("vzHeard").classList.remove("dim"); $("vzHeard").textContent=EN()?"🤖 Understanding…":"🤖 알아듣는 중…";
+        if(!heardBusy()){ $("vzHeard").classList.remove("dim"); $("vzHeard").textContent=EN()?"🤖 Understanding…":"🤖 알아듣는 중…"; }
         try{
-          const t=await window.jnAiHear(b64,NAME[cur],EN()?"en":"ko");
+          const t=await window.jnAiHear(job.b64,NAME[cur],EN()?"en":"ko");
           failN=0;
-          if(!t||/^(없음|none|noise)\.?$/i.test(t.trim())){ $("vzHeard").textContent=""; }
-          else handle(t);
+          if(job.srDid()){ /* 그 사이 기본 인식이 넣음 */ }
+          else if(!t||/^(없음|none|noise)\.?$/i.test(t.trim())){ if(/🤖/.test($("vzHeard").textContent)) $("vzHeard").textContent=""; }
+          else{ aiDone.push({s:job.S,e:job.E}); if(aiDone.length>20) aiDone.shift(); handle(t); }
         }catch(e){
           console.warn("[AI 듣기]",e);
           failN++;
           $("vzHeard").textContent="";
-          if(failN>=2 && SR){ guide("AI 듣기가 잘 안 돼서 기본 음성 인식으로 바꿨어요."); stop(); mode="sr"; want=true; quiet=0; listen(); }
+          if(failN>=2 && SR){ guide("AI 듣기가 잘 안 돼서 기본 음성 인식으로 바꿨어요."); stop(); mode="sr"; want=true; quiet=0; if(!rec) listen(); }
           else guide((e&&e.userMsg)||"AI 연결이 잠깐 끊겼어요. 다시 말해 주세요.");
         }finally{ busy--; render(); if(q.length) send(q.shift()); }
       }
@@ -2568,8 +2581,17 @@
         const ms=buf.length*node.bufferSize/ctx.sampleRate*1000;
         const chunks=buf; buf=[]; speaking=false; quietMs=0;
         if(ms-END_MS<MIN_MS){ if(/🎙/.test($("vzHeard").textContent)) $("vzHeard").textContent=""; return; }
-        const b64=wav(chunks,ctx.sampleRate);
-        if(busy) q.push(b64); else send(b64);
+        const b64=wav(chunks,ctx.sampleRate), S=segS, E=Date.now()-END_MS, t0=Date.now();
+        const srDid=()=>srLog.some(x=>x.p>=S-800&&x.p<=E+400);
+        // 기본 인식이 이 말을 이미 알아들었으면 AI로 안 보냄. 아직 알아듣는 중이면 잠깐 기다림
+        const decide=()=>{
+          if(srDid()) return;
+          const wait=Date.now()-t0;
+          if(SR && rec && ((srInterimAt && srInterimAt<=E+400 && wait<1200) || wait<250)){ setTimeout(decide,80); return; }
+          const job={b64,S,E,srDid};
+          if(busy) q.push(job); else send(job);
+        };
+        decide();
       }
       function onAudio(e){
         if(!on) return;
@@ -2579,7 +2601,7 @@
         const thr=Math.max(0.012,floor*3.2);
         if(!speaking){
           pre.push(d); if(pre.length>PRE) pre.shift();
-          if(lv>thr){ loud++; if(loud>=2){ speaking=true; buf=pre.slice(); pre=[]; quietMs=0; $("vzHeard").classList.remove("dim"); $("vzHeard").textContent=EN()?"🎙 Hearing you…":"🎙 말소리가 들려요…"; } }
+          if(lv>thr){ loud++; if(loud>=2){ speaking=true; segS=Date.now()-pre.length*frameMs; buf=pre.slice(); pre=[]; quietMs=0; if(!heardBusy()){ $("vzHeard").classList.remove("dim"); $("vzHeard").textContent=EN()?"🎙 Hearing you…":"🎙 말소리가 들려요…"; } } }
           else{ loud=0; floor=floor*0.97+lv*0.03; }   // 주변 소음 크기를 천천히 따라감
         }else{
           buf.push(d);
@@ -2622,11 +2644,19 @@
     })();
     // AI 듣기를 쓸 수 있으면 AI, 아니면 기본 음성 인식
     let mode=null;
+    // 같이 듣기(PC): 기본 인식이 처리한 말 / AI가 처리한 말 기록 → 같은 말을 두 번 넣지 않음
+    let srLog=[], aiDone=[], srInterimAt=0;
+    const heardBusy=()=>!/^(|🎙.*|🤖.*)$/.test($("vzHeard").textContent);
     const pickMode=()=>window.__forceVoiceMode||((CAN_REC&&/^https:$/.test(location.protocol)&&window.jnAiHear)?"ai":(SR?"sr":"ai"));
-    function listening(){ return mode==="ai"?AI.isOn():!!rec; }
+    function listening(){ return mode==="ai"?(AI.isOn()||!!rec):!!rec; }
     async function startListen(){
       if(!mode) mode=pickMode();
-      if(mode==="ai"){ const ok=await AI.start(); if(!ok && SR){ mode="sr"; want=true; quiet=0; listen(); } return; }
+      if(mode==="ai"){
+        const ok=await AI.start();
+        if(SR){ want=true; quiet=0; listen(); }   // PC 크롬: 기본 인식도 같이 (빠른 쪽을 씀)
+        if(!ok && SR) mode="sr";
+        return;
+      }
       want=true; quiet=0; listen();
     }
     function stopListen(){ want=false; if(rec){ try{ rec.abort(); }catch(e){} rec=null; } AI.stop(); render(); }
@@ -2641,8 +2671,10 @@
 
     function open(){
       const bt=Number($("boardT").value);
-      v={t:v.t||(bt>0?bt:null),w:null,h:null,q:null}; cur=v.t?"w":"t"; added=[]; pending=false; editing=false;
-      $("vzHeard").textContent=""; guide();
+      v={t:v.t||(bt>0?bt:null),w:null,h:null,q:null}; cur="t"; added=[]; pending=false; editing=false;
+      $("vzHeard").textContent="";
+      // 열 때는 항상 두께부터 물어봄
+      if(v.t!=null) guide(`두께 <b>${v.t}T</b> 맞나요? 다르면 두께를 말해요<br><small>그대로면 "네" 또는 가로를 바로 말해요</small>`); else guide();
       const bd=$("vzBackdrop"); bd.hidden=false; render();
       startListen();
     }
