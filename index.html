@@ -2340,7 +2340,8 @@
     const F=["t","w","h","q"];
     const NAME={t:"두께",w:"가로",h:"세로",q:"수량"};
     const LIMIT={t:[1,100],w:[1,6000],h:[1,6000],q:[1,999]};
-    const MAX_T=30;   // 현장에서 가장 두꺼운 판 (두께 차례에 이보다 크면 가로로 봄)
+    const MAX_T=30;
+    function status(t,dim){ const el=$("vzHeard"); el.textContent=t; el.classList.toggle("dim",!!dim); }   // 현장에서 가장 두꺼운 판 (두께 차례에 이보다 크면 가로로 봄)
     let v={t:null,w:null,h:null,q:null}, cur="w", added=[], rec=null, want=false, quiet=0, pending=false, editing=false;
     const full=()=>v.t!=null&&v.w!=null&&v.h!=null&&v.q!=null;
     const askOk=()=>{ pending=true; editing=false; cur="q"; guide(`<b>${v.t}T · ${Number(v.w).toLocaleString()}×${Number(v.h).toLocaleString()} · ${v.q}개</b> 맞나요?<br><small>맞으면 "네" 또는 다음 부품 가로를 말해요</small>`); };
@@ -2514,7 +2515,6 @@
       r.onspeechstart=()=>{ sp=Date.now(); if(!heardBusy()) $("vzHeard").textContent=EN()?"🎙 Hearing you…":"🎙 말소리가 들려요…"; };
       const take=t=>{
         const P=sp||Date.now()-900; srInterimAt=0;
-        if(aiDone.some(a=>P>=a.s-800&&P<=a.e+400)) return;   // AI가 이미 넣은 말
         if(hasNum(t)) srLog.push({p:P,at:Date.now()});
         handle(t);
       };
@@ -2549,6 +2549,7 @@
       let ctx=null, stream=null, node=null, src=null, on=false, cal=[], floor=0.006, speaking=false, buf=[], pre=[], loud=0, quietMs=0, busy=0, q=[], wake=null, failN=0;
       const PRE=6, END_MS=650, MAX_MS=7000, MIN_MS=180;
       let segS=0;
+      let calTry=0;
       const rms=a=>{ let x=0; for(let i=0;i<a.length;i++) x+=a[i]*a[i]; return Math.sqrt(x/a.length); };
       function wav(chunks,rate){
         let n=0; chunks.forEach(c=>n+=c.length);
@@ -2570,14 +2571,14 @@
           const t=await window.jnAiHear(job.b64,NAME[cur],EN()?"en":"ko");
           failN=0;
           if(job.srDid()){ /* 그 사이 기본 인식이 넣음 */ }
-          else if(!t||/^(없음|none|noise)\.?$/i.test(t.trim())){ if(/🤖/.test($("vzHeard").textContent)) $("vzHeard").textContent=""; }
-          else{ aiDone.push({s:job.S,e:job.E}); if(aiDone.length>20) aiDone.shift(); handle(t); }
+          else if(!t||/^(없음|none|noise)\.?$/i.test(t.trim())){ status((EN()?"🤖 AI heard: nothing (no number)":"🤖 AI가 들은 말: 없음 (숫자 없음)"),true); }
+          else{ aiDone.push({s:job.S,e:job.E}); if(aiDone.length>20) aiDone.shift(); handle(t); status((EN()?"🤖 AI heard: ":"🤖 AI가 들은 말: ")+`"${t}"`); }
         }catch(e){
           console.warn("[AI 듣기]",e);
           failN++;
-          $("vzHeard").textContent="";
-          if(failN>=2 && SR){ guide("AI 듣기가 잘 안 돼서 기본 음성 인식으로 바꿨어요. 두께는 '두께 6'처럼 말해 주세요."); aiOK=false; syncEngine(); }
-          else guide((e&&e.userMsg)||"AI 연결이 잠깐 끊겼어요. 다시 말해 주세요.");
+          const why=String((e&&e.message)||"").replace(/\s+/g," ").slice(0,80);
+          status((EN()?"⚠️ AI failed: ":"⚠️ AI 연결 실패: ")+((e&&e.userMsg)||"")+(why?` [${why}]`:""));
+          if(failN>=3 && SR){ guide("AI 듣기가 잘 안 돼서 기본 음성 인식으로 바꿨어요. 두께는 '두께 6'처럼 말해 주세요."); aiOK=false; syncEngine(); }
         }finally{ busy--; render(); if(q.length) send(q.shift()); }
       }
       function segEnd(){
@@ -2585,12 +2586,12 @@
         const chunks=buf; buf=[]; speaking=false; quietMs=0;
         if(ms-END_MS<MIN_MS){ if(/🎙/.test($("vzHeard").textContent)) $("vzHeard").textContent=""; return; }
         const b64=wav(chunks,ctx.sampleRate), S=segS, E=Date.now()-END_MS, t0=Date.now();
-        const srDid=()=>srLog.some(x=>x.p>=S-800&&x.p<=E+400);
+        const srDid=()=>false;   // v112: 두 방식을 동시에 돌리지 않으니 겹침 검사 안 함
         // 기본 인식이 이 말을 이미 알아들었으면 AI로 안 보냄. 아직 알아듣는 중이면 잠깐 기다림
         const decide=()=>{
           if(srDid()) return;
           const wait=Date.now()-t0;
-          if(SR && rec && ((srInterimAt && srInterimAt<=E+400 && wait<1200) || wait<250)){ setTimeout(decide,80); return; }
+
           const job={b64,S,E,srDid};
           if(busy) q.push(job); else send(job);
         };
@@ -2600,7 +2601,17 @@
         if(!on) return;
         const d=new Float32Array(e.inputBuffer.getChannelData(0)); const lv=rms(d);
         const frameMs=d.length/ctx.sampleRate*1000;
-        if(cal.length<12){ cal.push(lv); if(cal.length===12){ const sorted=cal.slice().sort((a,b)=>a-b); floor=Math.max(0.003,sorted[6]); } return; }
+        if(cal.length<12){
+          cal.push(lv);
+          if(cal.length===12){
+            const sorted=cal.slice().sort((a,b)=>a-b), med=sorted[6], mx=sorted[11];
+            // 재는 동안 말소리가 섞였으면(가장 큰 소리가 보통보다 훨씬 큼) 다시 잼
+            if(mx>Math.max(0.02,med*5) && calTry<3){ calTry++; cal=[]; status(EN()?"⏳ Measuring background noise… (stay quiet a moment)":"⏳ 주변 소리 재는 중… (잠깐만 조용히)"); return; }
+            floor=Math.max(0.003,med); calTry=0;
+            status(EN()?"🎧 Ready — say it now":"🎧 준비됐어요. 말해 주세요");
+          }
+          return;
+        }
         const thr=Math.max(0.012,floor*3.2);
         if(!speaking){
           pre.push(d); if(pre.length>PRE) pre.shift();
@@ -2623,11 +2634,13 @@
           node=ctx.createScriptProcessor(2048,1,1);
           node.onaudioprocess=onAudio;
           src.connect(node); node.connect(ctx.destination);
-          on=true; cal=[]; speaking=false; buf=[]; pre=[]; loud=0;
+          on=true; cal=[]; calTry=0; speaking=false; buf=[]; pre=[]; loud=0;
+          status(EN()?"⏳ Measuring background noise… (stay quiet a moment)":"⏳ 주변 소리 재는 중… (잠깐만 조용히)");
           try{ if(navigator.wakeLock) wake=await navigator.wakeLock.request("screen"); }catch(_){}
           render(); return true;
         }catch(e){
           console.warn("[AI 듣기 시작 실패]",e);
+          status((EN()?"⚠️ Mic start failed: ":"⚠️ 마이크 시작 실패: ")+((e&&(e.name||e.message))||""));
           if(e&&(e.name==="NotAllowedError"||e.name==="SecurityError")) guide("마이크를 쓸 수 있게 허용해 주세요. 숫자 칸을 눌러 직접 넣어도 돼요.");
           else if(e&&e.name==="NotFoundError") guide("마이크를 찾지 못했어요. 마이크가 연결돼 있는지 확인해 주세요.");
           stop(); return false;
@@ -2647,9 +2660,10 @@
     })();
     // v111: 동시에 듣지 않음. 두께 차례에는 AI 듣기만, 가로·세로·수량은 기본 인식만
     let srLog=[], aiDone=[], srInterimAt=0, engine=null, active=false, aiOK=null;
-    const heardBusy=()=>!/^(|🎙.*|🤖.*)$/.test($("vzHeard").textContent);
+    const heardBusy=()=>!/^(|🎙.*|🤖.*|⏳.*|🎧.*|⚠️.*)$/.test($("vzHeard").textContent);
     const aiAvail=()=>{ if(aiOK===false) return false; if(window.__forceVoiceMode) return window.__forceVoiceMode==="ai"; return !!(CAN_REC&&/^https:$/.test(location.protocol)&&window.jnAiHear); };
-    function wantEngine(){ if(cur==="t" && !pending && aiAvail()) return "ai"; if(SR) return "sr"; return aiAvail()?"ai":null; }
+    // 한 글자로 말하기 쉬운 칸(두께·수량)과 확인("네")은 AI가 듣고, 가로·세로는 기본 인식
+    function wantEngine(){ if((cur==="t"||cur==="q"||pending) && aiAvail()) return "ai"; if(SR) return "sr"; return aiAvail()?"ai":null; }
     function stopEngines(){ want=false; if(rec){ try{ rec.abort(); }catch(e){} rec=null; } AI.stop(); }
     function syncEngine(){
       if(!active || $("vzBackdrop").hidden) return;
