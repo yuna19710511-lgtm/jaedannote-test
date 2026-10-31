@@ -2315,20 +2315,37 @@
   window.jnMicOK=!!SR;
   if(SR) document.querySelectorAll("[data-mic]").forEach(b=>b.hidden=false);
   let micRec=null;
+  // v115: 말로 고치기 🎤 — 후보 중 알아들을 수 있는 것을 고르고, 말이 끝나면 자동으로 보냄
   document.addEventListener("click",e=>{
     const b=e.target.closest("[data-mic]"); if(!b||!SR) return;
     e.preventDefault();
     if(micRec){ try{ micRec.stop(); }catch(_){} return; }
     const inp=document.getElementById(b.dataset.mic); if(!inp) return;
     const rec=new SR(); micRec=rec;
-    rec.lang=window.JN_LANG==="en"?"en-US":"ko-KR"; rec.interimResults=true; rec.maxAlternatives=1;
+    rec.lang=window.JN_LANG==="en"?"en-US":"ko-KR"; rec.interimResults=true; rec.maxAlternatives=5;
     const base=inp.value?inp.value.replace(/\s*$/," "):"";
+    let fin="", interim="";
+    const hasNum=t=>/\d/.test(window.jnKoNum?window.jnKoNum(t):t);
+    const pickAlt=res=>{
+      if(inp.id==="aiEditInput" && window.jnLocalEdit) for(let k=0;k<res.length;k++){ try{ if(window.jnLocalEdit(res[k].transcript)) return res[k].transcript; }catch(_){} }
+      for(let k=0;k<res.length;k++) if(hasNum(res[k].transcript)) return res[k].transcript;
+      return res[0].transcript;
+    };
     b.classList.add("on");
-    rec.onresult=ev=>{ let t=""; for(let i=0;i<ev.results.length;i++) t+=ev.results[i][0].transcript; inp.value=base+t; };
+    rec.onresult=ev=>{ let f="", t=""; for(let i=0;i<ev.results.length;i++){ const r=ev.results[i]; if(r.isFinal) f+=pickAlt(r); else t+=r[0].transcript; } fin=f; interim=t; inp.value=base+f+t; };
     rec.onerror=ev=>{ if(ev.error==="not-allowed"||ev.error==="service-not-allowed") toast("마이크 사용을 허용해 주세요."); else if(ev.error!=="no-speech"&&ev.error!=="aborted") toast("음성을 알아듣지 못했어요. 다시 해 주세요."); };
-    rec.onend=()=>{ b.classList.remove("on"); micRec=null; try{ inp.focus(); }catch(_){} };
+    rec.onend=()=>{
+      b.classList.remove("on"); micRec=null;
+      const said=(fin||interim).trim();   // 끝 신호가 없어도 들린 글자는 씀
+      inp.value=(base+said).trim();
+      if(said){
+        const form=inp.closest("form");
+        if(form){ if(form.requestSubmit) form.requestSubmit(); else { const sb=form.querySelector('[type="submit"]'); sb&&sb.click(); } }
+      }else{ try{ inp.focus(); }catch(_){} }
+    };
     try{ rec.start(); }catch(_){ b.classList.remove("on"); micRec=null; }
   });
+
 
   // ===== v106: 🎤 말로 부품 넣기 — 두께 → 가로 → 세로 → 수량을 한 칸씩 =====
   (function(){
@@ -2365,6 +2382,14 @@
       let s=" "+String(t||"")+" ";
       s=s.replace(/([영공일이삼사오육륙칠팔구십백천만])(이요|이에요|입니다|이고|이랑|하고|요)(?=[\s,.]|$)/g,"$1 ");
       s=s.replace(/(\d),(\d{3})/g,"$1$2").replace(/(\d)\s*점\s*(\d)/g,"$1.$2");
+      // v115: 크롬이 "육십"을 이상하게 적는 모양 → 바로잡기
+      s=s.replace(/(\d)\s?시(?![간작각계])/g,"$1십");                                   // "6시에" → 6십
+      s=s.replace(/유신|육심|육씹|육신/g,"육십").replace(/([일이삼사오칠팔구])(신|심|씹)(?=[\s에을를이으로x×*,.]|$)/g,"$1십");
+      s=s.replace(/([일이삼사오육칠팔구])시(?=\s|에|을|를|$)/g,"$1십");                     // "육시에" → 육십
+      // "칠 십", "육 백"처럼 띄어 적은 것 붙이기
+      s=s.replace(/([일이삼사오육칠팔구])\s+(?=[십백천])/g,"$1");
+      // 숫자+한글 단위 섞인 모양: "6십" "2천4백4십" → 한글로 바꿔서 아래에서 계산
+      s=s.replace(/(\d)(?=[십백천])/g,(m,d)=>"영일이삼사오육칠팔구"[+d]);
       // 고유어 수 + 개/장 (예: 세 개, 열두 장)
       s=s.replace(/(열|스물|스무|서른|마흔|쉰)?\s?(하나|한|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉)?\s*(?=개|장|매|짝|ea|EA)/g,(m,a,b)=>{ if(!a&&!b) return m; return " "+((NT[a]||0)+(NO[b]||0))+" "; });
       // 말 전체가 고유어 수 하나 (예: "다섯")
@@ -2375,11 +2400,19 @@
       // 따로 떨어진 한 글자 숫자 (예: "두께 육", "육 티", "삼 개")
       s=s.replace(/(^|\s)([일이삼사오육륙칠팔구])(?=\s|$|티|T|t|개|장|매|미리|밀리|mm)/g,(m,a,c)=>a+D[c]+" ");
       // 한자어 수 (단위가 들어간 것만, 예: 육백, 천이백, 십팔)
-      s=s.replace(/[영공일이삼사오육륙칠팔구십백천만](?:\s?[영공일이삼사오육륙칠팔구십백천만])*/g,run=>{
+      s=s.replace(/[영공일이삼사오육륙칠팔구십백천만](?:\s?[영공일이삼사오육륙칠팔구십백천만])*/g,(run,off,str)=>{
         const r=run.replace(/\s/g,"");
-        if(!/[십백천만]/.test(r)) return run;
-        return " "+sino(r).join(" ")+" ";
+        if(/[십백천만]/.test(r)) return " "+sino(r).join(" ")+" ";
+        // v115: 한 자씩 읽기 "이사사공" → 2440 (낱말 속 글자는 건드리지 않음: "사이즈" 등)
+        if(r.length<2) return run;
+        const prev=str[off-1]||"", next=str.slice(off+run.length);
+        const okPrev=!prev||/[\s\d,.x×*(]/.test(prev);
+        const okNext=!next.trim()||/^[\s\d,.x×*)]/.test(next)||/^(을|를|에|으로|로|이요|이고|짜리|개|장|매|티|t|T|미리|밀리|mm|이랑|하고|씩|요)/.test(next);
+        if(!okPrev||!okNext) return run;
+        return " "+[...r].map(c=>D[c]).join("")+" ";
       });
+      // "2 4 4 0"처럼 한 자리씩 띄어 적은 것 → 2440
+      s=s.replace(/(^|\s)(\d(?:\s\d){2,4})(?=\s|$)/g,(m,a,g)=>a+g.replace(/\s/g,""));
       return s;
     }
 
@@ -2708,6 +2741,7 @@
     btns.forEach(b=>b.addEventListener("click",open));
     $("vzClose").addEventListener("click",finish);
     $("vzDone").addEventListener("click",finish);
+    window.jnKoNum=toDigits;
     window.jnVoiceTest={parse,toDigits,handle,state:()=>({v,cur,added}),mode:()=>engine};
   })();
 
@@ -2720,7 +2754,8 @@
   }
   function localEditCmds(text){
     let s=String(text||"");
-    if(window.jnVoiceTest&&window.jnVoiceTest.toDigits) s=window.jnVoiceTest.toDigits(s);
+    s=s.replace(/곱하기|바이|\bby\b/gi," x ");
+    if(window.jnKoNum) s=window.jnKoNum(s);
     s=s.replace(/,(?=\d{3}\b)/g,"").replace(/(\d)\s*(곱하기|바이|by|x|X|×|\*|에)\s*(\d)/g,"$1x$3").replace(/\s+/g," ").trim();
     s=s.replace(/^(에이)(?=\s|$|의|를|는)/,"A").replace(/^(비)(?=\s|의|를|는)/,"B").replace(/^(씨)(?=\s|의|를|는)/,"C").replace(/^(디)(?=\s|의|를|는)/,"D");
     // 여러 가지를 한 번에 말했거나 추가하는 말이면 AI에 맡김
@@ -2739,12 +2774,23 @@
     const cm=s.match(/^([A-Za-z])(?=\s|$|의|를|는|번|수량|두께|삭제|\d)/);
     if(cm && codeFor(0).length===1){ const c=cm[1].toUpperCase(); if(parts.some((p,i)=>codeFor(i)===c)){ targets=[c]; rest=s.slice(1); } }
     if(!targets.length && sizes.length===1){ targets=findBy(sizes[0][0],sizes[0][1]).map(codeFor); rest=s.replace(/\d+(?:\.\d+)?x\d+(?:\.\d+)?/,""); }
+    // v115: 숫자를 순서대로 읽기 (사이에 "에", 띄어쓰기 등 무엇이 와도)
+    if(!targets.length && !sizes.length){
+      const nums=[...s.matchAll(/\d+(?:\.\d+)?/g)].map(m=>({n:+m[0],end:m.index+m[0].length}));
+      if(nums.length>=2){
+        const idx=findBy(nums[0].n,nums[1].n);
+        if(idx.length){
+          if(nums.length===4 && !/개|장|두께|티|미리/.test(s)){ idx.forEach(i=>out.push({type:"mod",code:codeFor(i),field:"치수",value:`${nums[2].n} x ${nums[3].n}`})); return out; }
+          targets=idx.map(codeFor); rest=s.slice(nums[1].end);
+        }
+      }
+    }
     if(!targets.length) return null;
     let m;
     if(/삭제|빼|지워|없애/.test(rest)){ targets.forEach(c=>out.push({type:"del",code:c})); return out; }
     if((m=rest.match(/두께\s*(\d+(?:\.\d+)?)/))||(m=rest.match(/(\d+(?:\.\d+)?)\s*(?:t|T|티|미리)(?![a-z])/))){ targets.forEach(c=>out.push({type:"mod",code:c,field:"두께",value:m[1]})); return out; }
     if((m=rest.match(/(\d+)\s*(?:개|장|ea|EA|pcs)/))||(m=rest.match(/(?:수량|개수)\s*(?:을|를)?\s*(\d+)/))){ targets.forEach(c=>out.push({type:"mod",code:c,field:"수량",value:m[1]})); return out; }
-    if(cm && targets.length===1 && (m=rest.match(/(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)/))){ out.push({type:"mod",code:targets[0],field:"치수",value:`${m[1]} x ${m[2]}`}); return out; }
+    if((m=rest.match(/(\d+(?:\.\d+)?)\s*(?:x|\s)\s*(\d+(?:\.\d+)?)/))){ targets.forEach(c=>out.push({type:"mod",code:c,field:"치수",value:`${m[1]} x ${m[2]}`})); return out; }
     return null;
   }
   window.jnLocalEdit=localEditCmds;
@@ -7759,7 +7805,7 @@
 <script>
 /* v114: 자동 업데이트 — 새 버전이 올라왔는지 앱이 스스로 확인 */
 (function(){
-  var APP_VER="114";
+  var APP_VER="115";
   window.JN_APP_VER=APP_VER;
   if(!/^https?:$/.test(location.protocol)) return;
   var shown=false, hiddenAt=0;
